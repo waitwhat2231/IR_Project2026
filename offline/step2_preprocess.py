@@ -21,6 +21,50 @@ from shared.config import RAW_DIR, PROCESSED_DIR, DATASETS
 from Services.PreprocessingService.preprocessor import TextPreprocessor
 
 
+# def preprocess_dataset(name: str, preprocessor: TextPreprocessor):
+#     raw_path   = RAW_DIR / name
+#     proc_path  = PROCESSED_DIR / name
+#     proc_path.mkdir(parents=True, exist_ok=True)
+
+#     # ── Documents ─────────────────────────────────────────────────────────────
+#     out_file = proc_path / "processed_docs.pkl"
+#     if out_file.exists():
+#         print(f"  [{name}] processed_docs.pkl already exists — skipping.")
+#     else:
+#         print(f"\n  [{name}] Loading raw documents...")
+#         with open(raw_path / "docs.pkl", "rb") as f:
+#             raw_docs = pickle.load(f)
+
+#         processed = {}
+#         for doc_id, doc in tqdm(raw_docs.items(), desc=f"  Preprocessing {name}"):
+#             full_text = (doc.get("title","") + " " + doc.get("text","")).strip()
+#             result    = preprocessor.process(full_text)
+#             processed[doc_id] = {
+#                 "processed_str":    result["processed_str"],
+#                 "processed_tokens": result["processed_tokens"],
+#                 # Original text NOT stored here — it goes to MongoDB in step 8
+#             }
+
+#         with open(out_file, "wb") as f:
+#             pickle.dump(processed, f)
+#         print(f"  Saved {len(processed):,} preprocessed docs → {out_file}")
+
+#     # ── Queries ───────────────────────────────────────────────────────────────
+#     q_out = proc_path / "processed_queries.json"
+#     if q_out.exists():
+#         print(f"  [{name}] processed_queries.json already exists — skipping.")
+#     else:
+#         raw_queries = json.loads((raw_path / "queries.json").read_text())
+#         proc_queries = {}
+#         for qid, qtext in raw_queries.items():
+#             result = preprocessor.process(qtext)
+#             proc_queries[qid] = {
+#                 "original":         qtext,
+#                 "processed_str":    result["processed_str"],
+#                 "processed_tokens": result["processed_tokens"],
+#             }
+#         q_out.write_text(json.dumps(proc_queries, indent=2))
+#         print(f"  Saved {len(proc_queries):,} processed queries → {q_out}")
 def preprocess_dataset(name: str, preprocessor: TextPreprocessor):
     raw_path   = RAW_DIR / name
     proc_path  = PROCESSED_DIR / name
@@ -36,15 +80,35 @@ def preprocess_dataset(name: str, preprocessor: TextPreprocessor):
             raw_docs = pickle.load(f)
 
         processed = {}
+        
+        # إذا كان هناك ملف جزئي محفوظ سابقاً سنسترجعه لنكمل عليه
+        if out_file.exists() and out_file.stat().st_size > 0:
+            with open(out_file, "rb") as f:
+                processed = pickle.load(f)
+            print(f"  Resuming from {len(processed):,} already processed docs.")
+
+        count = 0
         for doc_id, doc in tqdm(raw_docs.items(), desc=f"  Preprocessing {name}"):
+            if doc_id in processed:
+                continue
+                
             full_text = (doc.get("title","") + " " + doc.get("text","")).strip()
             result    = preprocessor.process(full_text)
             processed[doc_id] = {
                 "processed_str":    result["processed_str"],
                 "processed_tokens": result["processed_tokens"],
-                # Original text NOT stored here — it goes to MongoDB in step 8
             }
+            
+            # حفظ الداتا كل 20 ألف وثيقة لتجنب ملء الـ RAM
+            count += 1
+            if count % 20000 == 0:
+                with open(out_file, "wb") as f:
+                    pickle.dump(processed, f)
+                # تنظيف جزئي للذاكرة في بايثون
+                import gc
+                gc.collect()
 
+        # الحفظ النهائي عند الاكتمال
         with open(out_file, "wb") as f:
             pickle.dump(processed, f)
         print(f"  Saved {len(processed):,} preprocessed docs → {out_file}")
