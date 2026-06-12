@@ -1,0 +1,21 @@
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Virtual Environments
+venv/
+env/
+.venv/
+
+# Data directory (The most important part!)
+data/
+!data/.gitkeep
+
+# IDE files
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and databases
+*.log
+mongodb_data/
