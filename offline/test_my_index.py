@@ -1,28 +1,28 @@
-import pickle
+import sys
+import time  
 from pathlib import Path
 
-# الرجوع خطوة للأعلى لأن الملف موجود داخل مجلد offline
-BASE_DIR = Path(__file__).resolve().parent.parent
-index_file = BASE_DIR / "data" / "indexes" / "webis-touche2020" / "inverted_index.pkl"
+# إضافة مسار المشروع الرئيسي
+sys.path.append(str(Path(__file__).parent.parent))
+from Services.indexing_service.inverted_index import InvertedIndexManager
 
-print(f"[*] Opening your real Inverted Index at:\n    {index_file}")
+print("[*] Testing Majd's updated InvertedIndexManager...")
+# استدعاء المدير الخاص بالداتاسيت
+manager = InvertedIndexManager("webis-touche2020")
 
-# باقي الكود كما هو تماماً دون تغيير...
-print("[*] Reading data...")
-with open(index_file, "rb") as f:
-    inverted_index = pickle.load(f)
+# طباعة الإحصائيات الشاملة التي احتسبها
+print(f"\n--- Corpus Statistics ---")
+print(f"[+] Total Documents (N): {manager.N:,}")
+print(f"[+] Average Doc Length (avg_dl): {manager.avg_dl:.2f} tokens")
+print(f"[+] Total Unique Terms: {len(manager.index):,}")
 
-print(f"[+] Total unique words found: {len(inverted_index):,}")
-
-test_words = ["health", "education", "internet"]
-
-print("\n--- Searching the index for real words ---")
-for word in test_words:
-    if word in inverted_index:
-        postings = inverted_index[word]
-        print(f"\nWord: '{word}'")
-        print(f" -> Appeared in {len(postings):,} different documents.")
-        sample_docs = list(postings.items())[:3]
-        print(f" -> Sample documents and frequencies (TF): {sample_docs}")
-    else:
-        print(f"\nWord: '{word}' not found in the index.")
+# فحص كلمة وحساب الـ IDF الرياضي لها
+word = "health"
+start_time = time.perf_counter()
+postings = manager.get_postings(word)
+end_time = time.perf_counter()
+execution_time_ms = (end_time - start_time) * 1000
+print(f"\n--- Testing Word: '{word}' ---")
+print(f" -> Document Frequency (DF): {len(postings):,}")
+print(f" -> Computed BM25 IDF: {manager.idf(word):.4f}")
+print(f" -> Time Taken: {execution_time_ms:.4f} ms")
