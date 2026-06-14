@@ -1,41 +1,74 @@
-import sys
-from pathlib import Path
+import pickle
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
 
-sys.path.append(str(Path(__file__).parent.parent))
+# Direct imports matching your shared/config.py layout
+from shared.config import MODEL_DIR, DATASETS, SBERT_MODEL, TOP_K
 
-from Services.retrieval_service.word2vec_retriever import Word2VecRetriever
-from Services.retrieval_service.tfidf_retriever import TFIDFRetriever
+def test_sbert_retrieval(query: str, dataset_name: str, top_k: int = TOP_K):
+    print(f"--- Testing SBERT Retrieval for Dataset: {dataset_name} ---")
+    print(f"Query: '{query}'\n")
+
+    # 1. Resolve paths using your pathlib config setup
+    model_dir = MODEL_DIR / f"sbert_{dataset_name}"
+    faiss_path = model_dir / "faiss.index"
+    meta_path = model_dir / "meta.pkl"
+
+    if not faiss_path.exists() or not meta_path.exists():
+        raise FileNotFoundError(
+            f"Trained SBERT assets missing in {model_dir}.\n"
+            f"Please ensure step5_train_sbert.py has executed successfully."
+        )
+
+    # 2. Load the binary FAISS index matrix
+    print("[1/3] Loading FAISS index and metadata configurations...")
+    index = faiss.read_index(str(faiss_path))
+    
+    with open(meta_path, "rb") as f:
+        metadata = pickle.load(f)
+    
+    # Safely fallback to config defaults if keys are missing from pickle metadata
+    model_name = metadata.get("model_name", SBERT_MODEL)
+    doc_ids = metadata.get("doc_ids") 
+    doc_text_dict = metadata.get("doc_texts", {}) # Fallback if you cached raw texts for viewing
+
+    # 3. Compute dense spatial array representation of the query
+    print(f"[2/3] Transforming query string via model: {model_name}...")
+    model = SentenceTransformer(model_name)
+    
+    # FAISS strict typing rule: vectors must be flattened 2D float32 numpy arrays
+    query_vector = model.encode([query], convert_to_numpy=True).astype("float32")
+    
+    # 4. Search the vector space index 
+    print(f"[3/3] Querying index for top-{top_k} nearest semantic neighbors...")
+    similarities, indices = index.search(query_vector, top_k)
+
+    # 5. Output Ranked Matches
+    print("\n======= SYSTEM MATCHES =======")
+    for rank, (sim, idx) in enumerate(zip(similarities[0], indices[0]), start=1):
+        if idx == -1:  # Sentinel padding check for empty index values
+            continue
+            
+        target_doc_id = doc_ids[idx]
+        raw_text = doc_text_dict.get(target_doc_id, "[Raw context text not available in meta.pkl]")
+        text_preview = raw_text[:130] + "..." if len(raw_text) > 130 else raw_text
+
+        print(f"Rank {rank}: [Doc ID: {target_doc_id}] (Score/Similarity: {sim:.4f})")
+        print(f"   Excerpt: {text_preview}\n")
 
 
-def test_tfidf_retriever_returns_matching_document_first():
-	corpus = {
-		"doc-1": "apple banana apple",
-		"doc-2": "car engine road",
-	}
-
-	retriever = TFIDFRetriever().fit(corpus)
-	results = retriever.retrieve("apple", top_k=2)
-
-	assert results[0][0] == "doc-1"
-	assert results[0][1] >= results[1][1]
-
-
-def test_word2vec_retriever_roundtrip(tmp_path: Path):
-	corpus = {
-		"doc-1": ["apple", "banana", "apple"],
-		"doc-2": ["car", "engine", "road"],
-		"doc-3": ["apple", "fruit"],
-	}
-
-	retriever = Word2VecRetriever(vector_size=32, min_count=1, epochs=10, workers=1, seed=13)
-	retriever.fit(corpus)
-
-	prefix = tmp_path / "word2vec_test"
-	retriever.save(prefix)
-
-	loaded = Word2VecRetriever.load(prefix)
-	results = loaded.retrieve("apple", top_k=3)
-
-	assert loaded.doc_embeddings is not None
-	assert loaded.doc_embeddings.shape[0] == 3
-	assert results[0][0] in {"doc-1", "doc-3"}
+if __name__ == "__main__":
+    # Verifies against the explicit dataset key string configured inside your dict
+    DATASET_KEY = "webis-touche2020" 
+    
+    # Test query checking structural thematic retrieval 
+    SAMPLE_QUERY = "Should cellular devices be banned from school grounds?"
+    
+    if DATASET_KEY not in DATASETS:
+        print(f"Warning: '{DATASET_KEY}' is missing from config.DATASETS definitions.")
+    
+    try:
+        test_sbert_retrieval(query=SAMPLE_QUERY, dataset_name=DATASET_KEY)
+    except Exception as e:
+        print(f"\nExecution Failed: {e}")

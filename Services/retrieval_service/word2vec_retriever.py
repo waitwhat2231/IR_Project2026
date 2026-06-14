@@ -25,7 +25,16 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 from gensim.models import Word2Vec
+from gensim.models.callbacks import CallbackAny2Vec
 
+class _EpochLogger(CallbackAny2Vec):                  # ← add this class here
+    def __init__(self):
+        self.epoch = 0
+    def on_epoch_begin(self, model):
+        self.epoch += 1
+        print(f"    Epoch {self.epoch}/5 starting...", flush=True)
+    def on_epoch_end(self, model):
+        print(f"    Epoch {self.epoch}/5 done. Vocab={len(model.wv):,}", flush=True)
 
 class Word2VecRetriever:
 
@@ -61,23 +70,22 @@ class Word2VecRetriever:
         Pass 2: compute and store mean document vectors
         """
         corpus_path = Path(corpus_path)
-
-        print(f"  Training Word2Vec "
-              f"(dim={self.vector_size}, window={self.window}, "
-              f"epochs={self.epochs})...")
+        print(f"  Training Word2Vec (dim={self.vector_size}, window={self.window}, epochs={self.epochs})...")
 
         stream = _PickleStreamCorpus(corpus_path)
 
+        print("  Building vocabulary...", flush=True)
         self.model = Word2Vec(
-            sentences   = stream,
-            vector_size = self.vector_size,
-            window      = self.window,
-            min_count   = self.min_count,
-            workers     = self.workers,
-            epochs      = self.epochs,
+            sentences    = stream,
+            vector_size  = self.vector_size,
+            window       = self.window,
+            min_count    = self.min_count,
+            workers      = 4,
+            epochs       = self.epochs,
+            compute_loss = False,
+            callbacks    = [_EpochLogger()],
         )
         print(f"  Vocabulary: {len(self.model.wv):,} words")
-
         print(f"  Computing document vectors (mean pooling)...")
         self._compute_doc_vectors(corpus_path)
 

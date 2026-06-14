@@ -49,7 +49,7 @@ class SBERTRetriever:
         """
         if self.model is None:
             print(f"  Loading SBERT model: {self.model_name}")
-            self.model = SentenceTransformer(self.model_name)
+            self.model = SentenceTransformer(self.model_name,device="cuda")
 
         self.doc_ids = list(docs.keys())
         texts        = list(docs.values())
