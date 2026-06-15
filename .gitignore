@@ -29,3 +29,12 @@ ir_datasets_cache/
 
 __pycache__/
 *.pyc
+
+data/
+models/
+__pycache__/
+.venv/
+ir_env/
+*.pkl
+*.npz
+*.bin

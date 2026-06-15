@@ -47,9 +47,15 @@ class SBERTRetriever:
           Inner product then equals cosine similarity.
           FAISS IndexFlatIP computes cosine natively.
         """
+        # if self.model is None:
+        #     print(f"  Loading SBERT model: {self.model_name}")
+        #     self.model = SentenceTransformer(self.model_name,device="cuda")
         if self.model is None:
-            print(f"  Loading SBERT model: {self.model_name}")
-            self.model = SentenceTransformer(self.model_name,device="cuda")
+            print(f"   Loading SBERT model: {self.model_name}")
+            import torch
+            target_device = "cuda" if torch.cuda.is_available() else "cpu"
+            print(f"   [*] SentenceTransformer will run on: {target_device.upper()}")
+            self.model = SentenceTransformer(self.model_name, device=target_device)
 
         self.doc_ids = list(docs.keys())
         texts        = list(docs.values())
