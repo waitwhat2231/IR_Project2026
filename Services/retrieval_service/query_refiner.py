@@ -1,4 +1,3 @@
-
 """
 Requirement 5: Query Refinement Service.
 Handles Spelling Correction, Query Expansion (Synonyms), and Search History.
@@ -14,6 +13,14 @@ class QueryRefiner:
         self.spell = SpellChecker()
         self.history_path = history_path
         self._init_history()
+        
+        # قائمة موحدة وشاملة لحماية الكلمات الشائعة من التصحيح الإملائي العشوائي ومن جلب المرادفات المشوهة
+        self.protected_stopwords = {
+            'us', 'u', 'it', 'me', 'my', 'we', 'you', 'they', 'he', 'she', 'him', 'her',
+            'is', 'are', 'am', 'was', 'were', 'be', 'been', 'being',
+            'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for', 'to', 'of', 'and', 'or', 'not', 'but',
+            'making', 'make', 'do', 'does', 'did', 'with', 'about', 'from', 'as'
+        }
 
     def _init_history(self):
         """إنشاء ملف سجل البحث إذا لم يكن موجوداً"""
@@ -22,44 +29,53 @@ class QueryRefiner:
                 json.dump([], f)
 
     def correct_spelling(self, query: str) -> str:
-        """تصحيح الأخطاء الإملائية مع حماية الكلمات الصحيحة تماماً"""
+        """تصحيح الأخطاء الإملائية مع حماية الكلمات الصحيحة والضمائر الشائعة"""
         words = query.split()
         corrected_words = []
+        
         for word in words:
-            # إذا كانت الكلمة مكونة من حرفين أو ثلاثة وضمن الضمائر الشائعة لا تلمسها
-            if word.lower() in ['us', 'for', 'the', 'is', 'on', 'in', 'it']:
+            # تنظيف الكلمة من علامات الاستفهام أو النقاط لتفادي تشتيت المصحح
+            clean_word = word.lower().strip("?!.,:;")
+            
+            # إذا كانت الكلمة محمية ضمن القائمة الموحدة، نتركها فوراً بدون تعديل
+            if clean_word in self.protected_stopwords:
                 corrected_words.append(word)
                 continue
                 
-            # فحص إذا كانت الكلمة معروفة للقاموس أصلاً
-            if word.lower() in self.spell:
+            # إذا كانت الكلمة معروفة للقاموس الأصلي نتركها
+            if clean_word in self.spell:
                 corrected_words.append(word)
             else:
-                cor = self.spell.correction(word)
+                cor = self.spell.correction(clean_word)
                 corrected_words.append(cor if cor else word)
         
         return " ".join(corrected_words)
 
     def expand_with_synonyms(self, raw_query: str) -> list:
-        """توسيع الاستعلام بالمرادفات باستخدام الكلمات الأصلية لمنع التشوه اللغوي"""
-        # تقسيم النص الأصلي إلى كلمات وتجنب الضمائر والكلمات الشائعة فوراً
-        words = [w.lower() for w in raw_query.split()]
-        ignored_words = ['us', 'u', 'it', 'me', 'is', 'are', 'am', 'the', 'a', 'an', 'in', 'on', 'at', 'by', 'for']
-        
+        """توسيع الاستعلام بالمرادفات النظيفة والأكاديمية باستخدام الكلمات الأصلية الفصيحة"""
+        words = raw_query.split()
         expanded_words = set()
         
         for word in words:
-            if word in ignored_words or len(word) <= 2:
+            clean_word = word.lower().strip("?!.,:;")
+            
+            # استبعاد الكلمات الوظيفية والقصيرة جداً فوراً بناءً على القائمة الموحدة
+            if clean_word in self.protected_stopwords or len(clean_word) <= 2:
                 continue
                 
-            expanded_words.add(word) # إضافة الكلمة الأصلية
+            # إضافة الكلمة الأصلية النظيفة أولاً
+            expanded_words.add(clean_word)
             
-            for syn in wordnet.synsets(word):
-                # نركز فقط على الأسماء والصفات والأفعال الأكاديمية (نبتعد عن العامية)
-                if syn.lexname() in ['noun.communication', 'noun.cognition', 'adj.all', 'noun.state', 'noun.phenomenon']:
+            # جلب المرادفات الأكاديمية فقط من WordNet
+            for syn in wordnet.synsets(clean_word):
+                allowed_lexnames = [
+                    'noun.communication', 'noun.cognition', 'adj.all', 'noun.state', 
+                    'noun.phenomenon', 'noun.act', 'verb.cognition', 'adv.all'
+                ]
+                if syn.lexname() in allowed_lexnames:
                     for lemma in syn.lemmas():
                         word_name = lemma.name().lower()
-                        # شروط صارمة: كلمة واحدة، بدون رموز، وحروفها نظيفة
+                        # تصفية الكلمات المركبة التي تحتوي على "_" أو "-" للتأكد من ملاءمتها للـ Index
                         if "_" not in word_name and "-" not in word_name and len(word_name) > 2:
                             expanded_words.add(word_name)
                             
@@ -73,13 +89,16 @@ class QueryRefiner:
             if query not in history:
                 history.append(query)
                 with open(self.history_path, 'w') as f:
-                    json.dump(history[-20:], f) # حفظ آخر 20 بحث فقط
+                    json.dump(history[-20:], f)  # حفظ آخر 20 بحث فقط
         except:
             pass
 
     def get_suggestions(self, current_input: str) -> list:
         """اقتراح استعلامات بناءً على سجل البحث (Query Suggestion)"""
         if not current_input: return []
-        with open(self.history_path, 'r') as f:
-            history = json.load(f)
-        return [q for q in history if q.startswith(current_input.lower())][:5]
+        try:
+            with open(self.history_path, 'r') as f:
+                history = json.load(f)
+            return [q for q in history if q.startswith(current_input.lower())][:5]
+        except:
+            return []
