@@ -1,0 +1,41 @@
+# docker-compose.yml
+# ---------------------------------------------------------------------------
+# Runs MongoDB in a container so you do NOT have to install MongoDB on your PC.
+#
+# Quick start:
+#     docker compose up -d        # start MongoDB in the background
+#     docker compose ps           # check it is running/healthy
+#     docker compose down         # stop it (data is kept, see volume below)
+#
+# How this maps to shared/config.py (lines 21-24):
+#   - The published port 27017 lets the script on your PC connect via
+#       MONGO_URI = mongodb://localhost:27017
+#   - The service/container name "mongodb" lets OTHER containers on this
+#     network connect via
+#       MONGO_URI_DOCKER = mongodb://mongodb:27017
+#   - MONGO_DB ("ir_system") and MONGO_COLL ("documents") are created
+#     automatically by the seeding script on first insert.
+# ---------------------------------------------------------------------------
+
+services:
+  mongodb:
+    image: mongo:7                 # official MongoDB image, pulled automatically
+    container_name: mongodb        # must match the host in MONGO_URI_DOCKER
+    restart: unless-stopped
+    ports:
+      - "27017:27017"             # host:container -> reachable at localhost:27017
+    volumes:
+      - mongo_data:/data/db        # persist the database between restarts
+    healthcheck:
+      # Marks the container "healthy" only once Mongo answers a ping.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+# Named volume where MongoDB stores its files. Because it is a named volume,
+# your seeded data survives "docker compose down" and container restarts.
+# (To wipe the data completely: docker compose down -v)
+volumes:
+  mongo_data:
