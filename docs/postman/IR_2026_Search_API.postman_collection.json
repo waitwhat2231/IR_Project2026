@@ -1,0 +1,301 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "IR 2026 Search API",
+    "description": "Postman collection for the IR 2026 API Gateway (Requirement 9).\n\n**Prerequisites**\n1. `conda activate ir_project`\n2. `docker compose up -d` (optional, for full document text in results)\n3. `uvicorn Services.gateway.main:app --host 0.0.0.0 --port 8000 --reload`\n\n**Collection variable** `baseUrl` defaults to `http://127.0.0.1:8000`.\n\nInteractive OpenAPI docs: `{{baseUrl}}/docs`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "dataset",
+      "value": "webis-touche2020",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health & Discovery",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Returns API status, MongoDB connectivity, and configured dataset names."
+          },
+          "response": []
+        },
+        {
+          "name": "List Datasets",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/datasets",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "datasets"]
+            },
+            "description": "List available datasets with document counts and model readiness (Req 9: dataset selection)."
+          },
+          "response": []
+        },
+        {
+          "name": "Retrieval Options",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/options",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "options"]
+            },
+            "description": "Returns supported execution modes, retrieval modes, and default BM25/hybrid parameters."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Search — Basic BM25",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Should teachers get tenure?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"bm25\",\n  \"top_k\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Core pipeline only: preprocess query, run BM25. No spell check or synonym expansion."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — Enhanced Hybrid Parallel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"shoud teacers get tenur?\",\n  \"execution_mode\": \"enhanced\",\n  \"retrieval_mode\": \"hybrid_parallel\",\n  \"sparse_method\": \"bm25\",\n  \"dense_method\": \"sbert\",\n  \"bm25_k1\": 1.2,\n  \"bm25_b\": 0.75,\n  \"alpha\": 0.5,\n  \"top_k\": 10,\n  \"include_snippet_chars\": 300\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Enhanced mode: spell correction + synonym expansion + history. Parallel hybrid fusion (BM25 + SBERT)."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — Hybrid Serial (Cascade)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Is vaping with e-cigarettes safe?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"hybrid_serial\",\n  \"sparse_method\": \"bm25\",\n  \"dense_method\": \"sbert\",\n  \"bm25_k1\": 1.5,\n  \"bm25_b\": 0.75,\n  \"cascade_top_n\": 200,\n  \"top_k\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Serial hybrid: BM25 retrieves top-N candidates, then SBERT reranks them."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — SBERT (Dense Only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"climate change policy debate\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"sbert\",\n  \"top_k\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Dense retrieval only using SBERT embeddings."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — TF-IDF (Sparse Only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"gun control laws\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"tfidf\",\n  \"top_k\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Sparse retrieval only using TF-IDF."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — Word2Vec (Dense Only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"artificial intelligence ethics\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"word2vec\",\n  \"top_k\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Dense retrieval only using Word2Vec."
+          },
+          "response": []
+        },
+        {
+          "name": "Search — Custom BM25 Parameters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Should teachers get tenure?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"bm25\",\n  \"bm25_k1\": 2.0,\n  \"bm25_b\": 0.6,\n  \"top_k\": 10,\n  \"include_snippet_chars\": 500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "search"]
+            },
+            "description": "Tune probabilistic BM25 parameters (k1, b) via the API (Req 2)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Query Refinement",
+      "item": [
+        {
+          "name": "Query Suggestions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/suggestions?q=should&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "suggestions"],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "should",
+                  "description": "Partial query prefix for autocomplete"
+                },
+                {
+                  "key": "limit",
+                  "value": "5",
+                  "description": "Max suggestions (1–20)"
+                }
+              ]
+            },
+            "description": "Autocomplete suggestions from search history (Requirement 5). Run an enhanced search first to populate history."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
