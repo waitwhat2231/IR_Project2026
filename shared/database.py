@@ -4,6 +4,8 @@ from pymongo import MongoClient, ASCENDING
 from pymongo.errors import BulkWriteError
 from tqdm import tqdm
 
+from shared.config import MONGO_URI, MONGO_DB, MONGO_COLL
+
 
 class DocumentDatabase:
     """
@@ -22,9 +24,10 @@ class DocumentDatabase:
     - No separate index needed for the most common query pattern
     """
 
-    def __init__(self, uri: str = None, db_name: str = "ir_system"):
-        self.uri     = uri or os.getenv("MONGO_URI", "mongodb://localhost:27017")
-        self.db_name = db_name
+    def __init__(self, uri: str = None, db_name: str = None, collection: str = None):
+        self.uri     = uri or os.getenv("MONGO_URI", MONGO_URI)
+        self.db_name = db_name or MONGO_DB
+        self.coll_name = collection or MONGO_COLL
         self.client  = None
         self.db      = None
         self.coll    = None
@@ -34,7 +37,7 @@ class DocumentDatabase:
         # Verify connection
         self.client.admin.command("ping")
         self.db   = self.client[self.db_name]
-        self.coll = self.db["documents"]
+        self.coll = self.db[self.coll_name]
         # Ensure index on dataset field for filtered queries
         self.coll.create_index([("dataset", ASCENDING)])
         print(f"MongoDB connected: {self.uri} / {self.db_name}")

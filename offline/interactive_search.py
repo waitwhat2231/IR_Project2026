@@ -13,24 +13,16 @@ sys.path.append(str(PROJECT_ROOT))
 from Services.retrieval_service.hybrid_retriever import HybridRetriever
 from Services.PreprocessingService.preprocessor import TextPreprocessor
 from Services.retrieval_service.query_refiner import QueryRefiner
-
-try:
-    from pymongo import MongoClient
-    PYMONGO_AVAILABLE = True
-except ImportError:
-    PYMONGO_AVAILABLE = False
+from shared.config import DATASETS, MONGO_DB, MONGO_COLL
+from shared.database import DocumentDatabase
 
 
 def get_mongo_connection():
-    """Connect to the secure Mongo database if it is a banking library."""
-    if not PYMONGO_AVAILABLE:
-        return None
+    """Connect to MongoDB using shared/config.py (ir_system / documents)."""
     try:
-        client = MongoClient("mongodb://localhost:27017/", serverSelectionTimeoutMS=1500)
-        db = client["ir_project"]  
-        collection = db["webis-touche2020"]
-        client.server_info()
-        return collection
+        db = DocumentDatabase()
+        db.connect()
+        return db
     except Exception:
         return None
 
@@ -41,7 +33,7 @@ def main():
     print("=" * 60)
 
     # 1. إعداد المسارات وتحميل الموديلات
-    dataset_name = "webis-touche2020"
+    dataset_name = next(iter(DATASETS))
     base_models_dir = PROJECT_ROOT / "data" / "models"
     
     bm25_dir = base_models_dir / f"bm25_{dataset_name}"
@@ -70,9 +62,13 @@ def main():
     refiner = QueryRefiner(history_path=search_history_file)
 
     print("[4/4] Checking MongoDB Storage Status...")
-    mongo_coll = get_mongo_connection()
-    if mongo_coll:
-        print("Connected to MongoDB successfully.")
+    mongo_db = get_mongo_connection()
+    if mongo_db:
+        count = mongo_db.count(dataset_name)
+        print(f"Connected to MongoDB ({MONGO_DB}/{MONGO_COLL}).")
+        print(f"  Documents for '{dataset_name}': {count:,}")
+        if count == 0:
+            print("  (Collection is empty — run offline/step9_load_to_mongodb.py)")
     else:
         print("Running in Local Index Mode (IDs & Scores only).")
 
@@ -150,9 +146,9 @@ def main():
             print(f"\nRank {rank} | Doc ID: {doc_id} | Score: {score:.4f}")
             print("-" * 45)
             
-            if mongo_coll:
+            if mongo_db:
                 try:
-                    doc_data = mongo_coll.find_one({"_id": doc_id}) or mongo_coll.find_one({"id": doc_id})
+                    doc_data = mongo_db.get_by_id(doc_id)
                     if doc_data:
                         print(f"Title  : {doc_data.get('title', 'No Title')}")
                         print(f"Content: {doc_data.get('text', 'No Content')[:300]}...")
