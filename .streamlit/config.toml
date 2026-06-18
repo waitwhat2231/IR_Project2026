@@ -1,0 +1,10 @@
+[browser]
+# Disable Streamlit telemetry — stops the api.segment.io CORS noise
+gatherUsageStats = false
+
+[server]
+headless = true
+port = 8501
+
+[client]
+toolbarMode = "minimal"

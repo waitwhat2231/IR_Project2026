@@ -1,5 +1,7 @@
 """Search orchestration for the API Gateway — mirrors offline/interactive_search.py."""
 
+import torch
+
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -45,7 +47,9 @@ class SearchPipeline:
     def get_retriever(self, dataset: str) -> HybridRetriever:
         if dataset not in self._retrievers:
             if dataset not in DATASETS:
-                raise ValueError(f"Unknown dataset '{dataset}'. Available: {list(DATASETS)}")
+                raise ValueError(
+                    f"Unknown dataset '{dataset}'. Available: {list(DATASETS)}"
+                )
             base = MODEL_DIR
             hybrid = HybridRetriever()
             hybrid.load_all_retrievers(
@@ -120,7 +124,10 @@ class SearchPipeline:
 
         if retrieval_mode == "bm25":
             return hybrid._compute_custom_bm25(
-                query_tokens, k1=bm25_k1, b=bm25_b, top_k=top_k,
+                query_tokens,
+                k1=bm25_k1,
+                b=bm25_b,
+                top_k=top_k,
             )
         if retrieval_mode == "tfidf":
             if not hybrid.tfidf:
@@ -172,10 +179,15 @@ class SearchPipeline:
         include_snippet_chars: int = 300,
     ) -> dict:
         if dataset not in DATASETS:
-            raise ValueError(f"Unknown dataset '{dataset}'. Available: {list(DATASETS)}")
+            raise ValueError(
+                f"Unknown dataset '{dataset}'. Available: {list(DATASETS)}"
+            )
 
-        processed_query, spell_corrected, expanded_terms, query_tokens = self._preprocess_query(
-            query, execution_mode,
+        processed_query, spell_corrected, expanded_terms, query_tokens = (
+            self._preprocess_query(
+                query,
+                execution_mode,
+            )
         )
         if not query_tokens:
             raise ValueError("Query produced no tokens after preprocessing.")
@@ -211,13 +223,15 @@ class SearchPipeline:
                 text = text[:include_snippet_chars]
             elif include_snippet_chars == 0:
                 text = None
-            results.append({
-                "rank": rank,
-                "doc_id": doc_id,
-                "score": round(float(score), 6),
-                "title": doc.get("title") or None,
-                "text": text,
-            })
+            results.append(
+                {
+                    "rank": rank,
+                    "doc_id": doc_id,
+                    "score": round(float(score), 6),
+                    "title": doc.get("title") or None,
+                    "text": text,
+                }
+            )
 
         return {
             "dataset": dataset,

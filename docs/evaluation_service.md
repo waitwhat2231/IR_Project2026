@@ -18,12 +18,12 @@ We run every model on the same test questions and measure how good its answers a
 
 The project requires these 4 metrics:
 
-| Metric | In one sentence |
-|--------|-----------------|
-| **MAP** (Mean Average Precision) | Are the correct documents ranked near the top, on average? |
-| **Recall** | Out of all correct documents, how many did we find? |
-| **Precision@10** | Of the first 10 results, how many are actually correct? |
-| **nDCG** | Like precision, but also rewards putting the *most* relevant docs first. |
+| Metric                           | In one sentence                                                          |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| **MAP** (Mean Average Precision) | Are the correct documents ranked near the top, on average?               |
+| **Recall**                       | Out of all correct documents, how many did we find?                      |
+| **Precision@10**                 | Of the first 10 results, how many are actually correct?                  |
+| **nDCG**                         | Like precision, but also rewards putting the _most_ relevant docs first. |
 
 A higher number is always better (all values are between 0 and 1).
 
@@ -34,6 +34,7 @@ A higher number is always better (all values are between 0 and 1).
 To grade a model we need an **answer key**. The dataset gives us two files:
 
 ### a) Queries — the test questions
+
 File: `data/raw/webis-touche2020/queries.json`
 
 ```json
@@ -44,6 +45,7 @@ File: `data/raw/webis-touche2020/queries.json`
 ```
 
 ### b) Qrels — the answer key (which documents are correct)
+
 File: `data/raw/webis-touche2020/qrels.json`
 
 `qrels` = "query relevance judgments". For each question, experts already marked
@@ -52,9 +54,9 @@ which documents are relevant and how relevant they are:
 ```json
 {
   "1": {
-    "doc_A": 2,   // very relevant
-    "doc_B": 1,   // relevant
-    "doc_C": 0    // not relevant
+    "doc_A": 2, // very relevant
+    "doc_B": 1, // relevant
+    "doc_C": 0 // not relevant
   }
 }
 ```
@@ -72,11 +74,11 @@ which documents are relevant and how relevant they are:
 Everything lives in the folder:
 `Services/ranking_evaluation_service/`
 
-| File | Job | Think of it as... |
-|------|-----|-------------------|
-| `scorer.py` | Does the **math** of the metrics | The calculator |
-| `evaluator.py` | Runs each model and **collects** the results | The manager |
-| `main.py` | The **start button** you actually run | The remote control |
+| File           | Job                                          | Think of it as...  |
+| -------------- | -------------------------------------------- | ------------------ |
+| `scorer.py`    | Does the **math** of the metrics             | The calculator     |
+| `evaluator.py` | Runs each model and **collects** the results | The manager        |
+| `main.py`      | The **start button** you actually run        | The remote control |
 
 This separation is on purpose: the math, the orchestration, and the entry point
 are kept apart so each piece is easy to read, test, and reuse.
@@ -118,7 +120,7 @@ The functions inside `scorer.py`:
 
 > **Why "average"?** Each question gets its own score first. The final number you
 > see in the table is the average across all 49 questions. (That is literally what
-> the "M" in **M**AP means: *Mean* Average Precision.)
+> the "M" in **M**AP means: _Mean_ Average Precision.)
 
 ---
 
@@ -130,13 +132,13 @@ This file does 4 things:
 2. **Asks each model for its answers** to all 49 questions. Important detail:
    each model wants its input in a different shape, and the manager handles that:
 
-   | Model | What we feed it |
-   |-------|-----------------|
-   | TF-IDF | the cleaned/stemmed query text |
-   | BM25 | the cleaned query as a list of words |
-   | Word2Vec | the cleaned query as a list of words |
-   | SBERT | the **original** query text (it cleans text its own way) |
-   | Hybrid | both at the same time |
+   | Model    | What we feed it                                          |
+   | -------- | -------------------------------------------------------- |
+   | TF-IDF   | the cleaned/stemmed query text                           |
+   | BM25     | the cleaned query as a list of words                     |
+   | Word2Vec | the cleaned query as a list of words                     |
+   | SBERT    | the **original** query text (it cleans text its own way) |
+   | Hybrid   | both at the same time                                    |
 
 3. **Calls the calculator** (`scorer.py`) to grade those answers.
 4. **Saves everything** neatly to disk (explained in section 7).
@@ -215,6 +217,7 @@ data/evaluation/webis-touche2020/baseline/
 ## 8. The "phase" idea (before vs. after extra features)
 
 The project asks us to evaluate **twice**:
+
 - **before** adding the extra/bonus features, and
 - **after** adding them,
 
@@ -239,16 +242,17 @@ Each phase saves into its own folder
 
 This is the actual output from running it on **49 test questions**:
 
-| model | MAP | Recall@1000 | P@10 | nDCG@10 |
-|-------|-----|-------------|------|---------|
-| tfidf | 0.0520 | 0.7330 | 0.0673 | 0.0566 |
-| **bm25** | **0.2194** | 0.8726 | **0.2898** | **0.3172** |
-| sbert | 0.1312 | 0.7706 | 0.1673 | 0.1709 |
-| word2vec | 0.1017 | 0.7441 | 0.1347 | 0.1561 |
-| hybrid_parallel | 0.2137 | **0.8784** | 0.2653 | 0.2903 |
-| hybrid_serial | 0.1431 | 0.8708 | 0.1755 | 0.1781 |
+| model           | MAP        | Recall@1000 | P@10       | nDCG@10    |
+| --------------- | ---------- | ----------- | ---------- | ---------- |
+| tfidf           | 0.0520     | 0.7330      | 0.0673     | 0.0566     |
+| **bm25**        | **0.2194** | 0.8726      | **0.2898** | **0.3172** |
+| sbert           | 0.1312     | 0.7706      | 0.1673     | 0.1709     |
+| word2vec        | 0.1017     | 0.7441      | 0.1347     | 0.1561     |
+| hybrid_parallel | 0.2137     | **0.8784**  | 0.2653     | 0.2903     |
+| hybrid_serial   | 0.1431     | 0.8708      | 0.1755     | 0.1781     |
 
 ### How to read this
+
 - **BM25 is the best overall** model on this dataset (highest MAP, P@10, nDCG@10).
 - **hybrid_parallel** finds the most correct documents in total (highest Recall)
   and is almost as good as BM25.

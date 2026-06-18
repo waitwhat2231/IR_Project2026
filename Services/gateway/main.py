@@ -12,6 +12,9 @@ Endpoints:
     GET  /api/v1/suggestions
 """
 
+# import os
+# os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -73,12 +76,14 @@ def list_datasets():
     """List datasets available for search (Req 9: select dataset before querying)."""
     items = []
     for name, ir_key in DATASETS.items():
-        items.append(DatasetInfo(
-            name=name,
-            ir_dataset_key=ir_key,
-            document_count=pipeline.document_count(name),
-            models_ready=pipeline.models_ready(name),
-        ))
+        items.append(
+            DatasetInfo(
+                name=name,
+                ir_dataset_key=ir_key,
+                document_count=pipeline.document_count(name),
+                models_ready=pipeline.models_ready(name),
+            )
+        )
     return DatasetsResponse(datasets=items)
 
 
@@ -150,5 +155,5 @@ if __name__ == "__main__":
         "Services.gateway.main:app",
         host="0.0.0.0",
         port=PORTS["gateway"],
-        reload=True,
+        reload=False,
     )
