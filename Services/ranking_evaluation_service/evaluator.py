@@ -27,7 +27,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, cast
 
 # Add the project root to the path so imports work when run directly
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -48,7 +48,7 @@ class RankingEvaluator:
 
     def __init__(self, dataset_name: str, top_k: int = 1000):
         self.dataset_name = dataset_name
-        self.top_k = top_k   # retrieval depth used per model (affects Recall and MAP)
+        self.top_k = top_k  # retrieval depth used per model (affects Recall and MAP)
 
         # -- Step 1: load the relevance judgments (qrels) --------------------
         qrels_path = RAW_DIR / dataset_name / "qrels.json"
@@ -127,7 +127,7 @@ class RankingEvaluator:
                 query_tokens=data["processed_tokens"],
                 sparse_method="bm25",
                 dense_method="sbert",
-                cascade_top_n=self.top_k,   # pass enough depth for the first stage
+                cascade_top_n=self.top_k,  # pass enough depth for the first stage
                 top_k=self.top_k,
             )
         return run
@@ -156,13 +156,16 @@ class RankingEvaluator:
         elapsed = time.perf_counter() - start
         scored["elapsed_sec"] = round(elapsed, 2)
 
-        # Brief print of the four primary metrics
-        agg = scored["aggregate"]
-        print(f"[Evaluator] done {model_name} in {elapsed:.1f}s | "
-              f"MAP={agg.get('MAP', 0):.4f}  "
-              f"Recall@1000={agg.get('Recall@1000', 0):.4f}  "
-              f"P@10={agg.get('P@10', 0):.4f}  "
-              f"nDCG@10={agg.get('nDCG@10', 0):.4f}")
+        # FIX: Force the strict linter to accept the type using 'cast'
+        agg = cast(Dict[str, float], scored["aggregate"])
+
+        print(
+            f"[Evaluator] done {model_name} in {elapsed:.1f}s | "
+            f"MAP={agg.get('MAP', 0):.4f}  "
+            f"Recall@1000={agg.get('Recall@1000', 0):.4f}  "
+            f"P@10={agg.get('P@10', 0):.4f}  "
+            f"nDCG@10={agg.get('nDCG@10', 0):.4f}"
+        )
 
         return scored
 
@@ -186,19 +189,26 @@ class RankingEvaluator:
         per_query_dir.mkdir(parents=True, exist_ok=True)
 
         # Metric column order: the four primary metrics first, then the extras
-        metric_order = ["MAP", "Recall@1000", "P@10", "nDCG@10",
-                        "P@5", "Recall@100", "nDCG@100"]
+        metric_order = [
+            "MAP",
+            "Recall@1000",
+            "P@10",
+            "nDCG@10",
+            "P@5",
+            "Recall@100",
+            "nDCG@100",
+        ]
 
         # (1) Full JSON summary
         summary = {
-            "dataset":     self.dataset_name,
-            "phase":       phase,
-            "top_k":       self.top_k,
+            "dataset": self.dataset_name,
+            "phase": phase,
+            "top_k": self.top_k,
             "num_queries": len(self.queries),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
             "models": {
                 name: {
-                    "aggregate":   res["aggregate"],
+                    "aggregate": res["aggregate"],
                     "elapsed_sec": res.get("elapsed_sec"),
                 }
                 for name, res in results_by_model.items()
@@ -224,15 +234,20 @@ class RankingEvaluator:
                 json.dump(res["per_query"], f, indent=2, ensure_ascii=False)
 
         # (4) Readable text report
-        self._write_text_report(out_dir / "report.txt", phase,
-                                results_by_model, metric_order)
+        self._write_text_report(
+            out_dir / "report.txt", phase, results_by_model, metric_order
+        )
 
         print(f"\n[Evaluator] Results saved under: {out_dir}")
         return out_dir
 
-    def _write_text_report(self, path: Path, phase: str,
-                           results_by_model: Dict[str, dict],
-                           metric_order: List[str]) -> None:
+    def _write_text_report(
+        self,
+        path: Path,
+        phase: str,
+        results_by_model: Dict[str, dict],
+        metric_order: List[str],
+    ) -> None:
         """Builds a text report with the comparison table and per-query nDCG@10."""
         lines: List[str] = []
         lines.append("=" * 78)
@@ -249,7 +264,9 @@ class RankingEvaluator:
         lines.append("-" * len(header))
         for name, res in results_by_model.items():
             agg = res["aggregate"]
-            row = f"{name:<18}" + "".join(f"{agg.get(m, 0):>13.4f}" for m in metric_order)
+            row = f"{name:<18}" + "".join(
+                f"{agg.get(m, 0):>13.4f}" for m in metric_order
+            )
             lines.append(row)
         lines.append("")
 
@@ -265,7 +282,9 @@ class RankingEvaluator:
 
         # Header row: query id + each model
         model_names = list(results_by_model.keys())
-        head = f"{'qid':<6}" + "".join(f"{n[:12]:>13}" for n in model_names) + "   query"
+        head = (
+            f"{'qid':<6}" + "".join(f"{n[:12]:>13}" for n in model_names) + "   query"
+        )
         lines.append(head)
         lines.append("-" * len(head))
         for qid in qids_sorted:

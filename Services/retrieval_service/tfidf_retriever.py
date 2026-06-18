@@ -25,9 +25,12 @@ from scipy.sparse import load_npz, save_npz
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+
 def _whitespace_tokenizer(text: str):
     """Top-level tokenizer so pickle can serialize the TfidfVectorizer."""
     return text.split()
+
+
 class TFIDFRetriever:
     """
     Sparse VSM retrieval using TF-IDF + cosine similarity.
@@ -46,11 +49,11 @@ class TFIDFRetriever:
 
     def __init__(self):
         self.vectorizer: Optional[TfidfVectorizer] = None
-        self.doc_matrix  = None          # scipy sparse (N_docs × vocab_size)
-        self.doc_ids:    List[str] = []
+        self.doc_matrix = None  # scipy sparse (N_docs × vocab_size)
+        self.doc_ids: List[str] = []
 
     # ── Fitting ────────────────────────────────────────────────────────────────
-    
+
     def fit(self, corpus: Dict[str, str]):
         """
         corpus: {doc_id: "stemmed joined string"}
@@ -63,25 +66,27 @@ class TFIDFRetriever:
         print(f"  Fitting TF-IDF on {len(corpus):,} documents...")
 
         self.vectorizer = TfidfVectorizer(
-            analyzer      = "word",
-            tokenizer     = _whitespace_tokenizer,  # already preprocessed
-            preprocessor  = None,                 # skip sklearn's cleaning
-            token_pattern = None,                 # disabled when tokenizer= is set
-            sublinear_tf  = True,
-            max_df        = 0.85,
-            min_df        = 3,
-            max_features  = 150_000,
-            norm          = "l2",
+            analyzer="word",
+            tokenizer=_whitespace_tokenizer,  # already preprocessed
+            preprocessor=None,  # skip sklearn's cleaning
+            token_pattern=None,  # type: ignore # disabled when tokenizer= is set
+            sublinear_tf=True,
+            max_df=0.85,
+            min_df=3,
+            max_features=150_000,
+            norm="l2",
         )
 
-        self.doc_ids    = list(corpus.keys())
-        corpus_texts    = list(corpus.values())
+        self.doc_ids = list(corpus.keys())
+        corpus_texts = list(corpus.values())
 
         self.doc_matrix = self.vectorizer.fit_transform(corpus_texts)
 
         print(f"  Matrix shape : {self.doc_matrix.shape}")
         print(f"  Vocabulary   : {len(self.vectorizer.vocabulary_):,} terms")
-        print(f"  Non-zeros    : {self.doc_matrix.nnz:,}")
+        if self.doc_matrix is not None:
+            nnz_val = getattr(self.doc_matrix, "nnz", 0)
+            print(f"  Non-zeros    : {nnz_val:,}")
 
     # ── Retrieval ──────────────────────────────────────────────────────────────
 
@@ -107,7 +112,7 @@ class TFIDFRetriever:
                 "Call fit() or load() before retrieve()."
             )
 
-        q_vec  = self.vectorizer.transform([query_processed_str])
+        q_vec = self.vectorizer.transform([query_processed_str])
         scores = cosine_similarity(q_vec, self.doc_matrix).flatten()
 
         # argpartition is O(N) vs full argsort O(N log N)
@@ -116,7 +121,7 @@ class TFIDFRetriever:
             top_i = np.argsort(scores)[::-1]
         else:
             top_i_part = np.argpartition(scores, -top_k)[-top_k:]
-            top_i      = top_i_part[np.argsort(scores[top_i_part])[::-1]]
+            top_i = top_i_part[np.argsort(scores[top_i_part])[::-1]]
 
         return [(self.doc_ids[i], float(scores[i])) for i in top_i]
 
@@ -137,10 +142,10 @@ class TFIDFRetriever:
         if self.vectorizer is None or self.doc_matrix is None:
             raise RuntimeError("TFIDFRetriever is not fitted.")
 
-        qids    = list(queries.keys())
-        qtexts  = list(queries.values())
+        qids = list(queries.keys())
+        qtexts = list(queries.values())
 
-        q_matrix   = self.vectorizer.transform(qtexts)       # (n_q, vocab)
+        q_matrix = self.vectorizer.transform(qtexts)  # (n_q, vocab)
         all_scores = cosine_similarity(q_matrix, self.doc_matrix)  # (n_q, n_docs)
 
         results = {}
@@ -150,7 +155,7 @@ class TFIDFRetriever:
                 top_i = np.argsort(row)[::-1]
             else:
                 top_i_part = np.argpartition(row, -top_k)[-top_k:]
-                top_i      = top_i_part[np.argsort(row[top_i_part])[::-1]]
+                top_i = top_i_part[np.argsort(row[top_i_part])[::-1]]
             results[qid] = [(self.doc_ids[j], float(row[j])) for j in top_i]
 
         return results
@@ -170,7 +175,7 @@ class TFIDFRetriever:
         prefix.parent.mkdir(parents=True, exist_ok=True)
 
         matrix_path = Path(str(prefix) + "_matrix.npz")
-        meta_path   = Path(str(prefix) + "_meta.pkl")
+        meta_path = Path(str(prefix) + "_meta.pkl")
 
         save_npz(str(matrix_path), self.doc_matrix)
 
@@ -178,16 +183,14 @@ class TFIDFRetriever:
             pickle.dump(
                 {
                     "vectorizer": self.vectorizer,
-                    "doc_ids":    self.doc_ids,
+                    "doc_ids": self.doc_ids,
                 },
                 f,
             )
 
         print(f"  TF-IDF saved:")
-        print(f"    {matrix_path}  "
-              f"({matrix_path.stat().st_size / 1e6:.1f} MB)")
-        print(f"    {meta_path}    "
-              f"({meta_path.stat().st_size / 1e6:.1f} MB)")
+        print(f"    {matrix_path}  " f"({matrix_path.stat().st_size / 1e6:.1f} MB)")
+        print(f"    {meta_path}    " f"({meta_path.stat().st_size / 1e6:.1f} MB)")
 
     @classmethod
     def load(cls, prefix: Path) -> "TFIDFRetriever":
@@ -198,23 +201,23 @@ class TFIDFRetriever:
         Example:
             model = TFIDFRetriever.load(MODEL_DIR / "tfidf_webis-touche2020")
         """
-        prefix      = Path(prefix)
+        prefix = Path(prefix)
         matrix_path = Path(str(prefix) + "_matrix.npz")
-        meta_path   = Path(str(prefix) + "_meta.pkl")
+        meta_path = Path(str(prefix) + "_meta.pkl")
 
         if not matrix_path.exists():
             raise FileNotFoundError(f"Matrix not found: {matrix_path}")
         if not meta_path.exists():
             raise FileNotFoundError(f"Meta not found: {meta_path}")
 
-        obj            = cls()
+        obj = cls()
         obj.doc_matrix = load_npz(str(matrix_path))
 
         with open(meta_path, "rb") as f:
-            state      = pickle.load(f)
+            state = pickle.load(f)
 
         obj.vectorizer = state["vectorizer"]
-        obj.doc_ids    = state["doc_ids"]
+        obj.doc_ids = state["doc_ids"]
 
         print(f"  TF-IDF loaded:")
         print(f"    Docs  : {obj.doc_matrix.shape[0]:,}")

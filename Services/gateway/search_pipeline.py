@@ -31,18 +31,18 @@ class SearchPipeline:
         self._mongo: Optional[DocumentDatabase] = None
         self._mongo_connected = False
 
-    def connect_mongo(self) -> bool:
-        if self._mongo_connected:
-            return True
+    def connect_mongo(self) -> Optional[DocumentDatabase]:
+        if self._mongo_connected and self._mongo is not None:
+            return self._mongo
         try:
             self._mongo = DocumentDatabase()
             self._mongo.connect()
             self._mongo_connected = True
-            return True
+            return self._mongo
         except Exception:
             self._mongo = None
             self._mongo_connected = False
-            return False
+            return None
 
     def get_retriever(self, dataset: str) -> HybridRetriever:
         if dataset not in self._retrievers:
@@ -69,10 +69,11 @@ class SearchPipeline:
             return False
 
     def document_count(self, dataset: str) -> Optional[int]:
-        if not self.connect_mongo():
+        mongo = self.connect_mongo()
+        if mongo is None:
             return None
         try:
-            return self._mongo.count(dataset)
+            return mongo.count(dataset)
         except Exception:
             return None
 
@@ -209,11 +210,13 @@ class SearchPipeline:
 
         doc_ids = [doc_id for doc_id, _ in raw_results]
         docs_by_id: Dict[str, dict] = {}
-        if doc_ids and self.connect_mongo():
-            try:
-                docs_by_id = self._mongo.get_by_ids(doc_ids)
-            except Exception:
-                docs_by_id = {}
+        if doc_ids:
+            mongo = self.connect_mongo()
+            if mongo is not None:
+                try:
+                    docs_by_id = mongo.get_by_ids(doc_ids)
+                except Exception:
+                    docs_by_id = {}
 
         results = []
         for rank, (doc_id, score) in enumerate(raw_results, start=1):

@@ -8,15 +8,15 @@ No JSON ever leaks into the UI layer.
 from __future__ import annotations
 
 import urllib.parse
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-
 # ─────────────────────────────────────── Response dataclasses ──────────────
+
 
 @dataclass
 class DatasetInfo:
@@ -65,6 +65,7 @@ class RetrievalOptions:
 
 # ─────────────────────────────────────── Exception ─────────────────────────
 
+
 class IRAPIError(Exception):
     """
     Raised for any failure communicating with the API Gateway.
@@ -74,12 +75,44 @@ class IRAPIError(Exception):
     """
 
 
+# ─────────────────────────────────────── Helpers ───────────────────────────
+
+
+def _to_dataclass(cls: type, data: dict[str, Any]) -> Any:
+    """
+    Build a dataclass instance from a raw API dict, tolerant of extra keys.
+
+    The gateway is under active development, so it may add new response
+    fields before this client is updated to match. Unknown keys are
+    dropped instead of raising ``TypeError``. Missing *required* fields
+    still fail loudly, but as a clear ``IRAPIError`` instead of a raw
+    ``TypeError`` leaking out of the client.
+    """
+    known_fields = {f.name for f in fields(cls)}
+    filtered = {k: v for k, v in data.items() if k in known_fields}
+    try:
+        return cls(**filtered)
+    except TypeError as exc:
+        raise IRAPIError(
+            f"Gateway response for {cls.__name__} is missing required field(s): {exc}"
+        ) from exc
+
+
 # ─────────────────────────────────────── Client ────────────────────────────
+
 
 def _build_session() -> requests.Session:
     """Return a Session with a conservative retry strategy."""
     session = requests.Session()
-    retry = Retry(total=2, backoff_factor=0.3, status_forcelist=[502, 503, 504])
+    retry = Retry(
+        total=2,
+        backoff_factor=0.3,
+        status_forcelist=[502, 503, 504],
+        # GET is retried by default; POST is opted in explicitly because
+        # /api/v1/search and /api/v1/suggestions are read-only on the
+        # backend, so retrying a transient 502/503/504 is safe.
+        allowed_methods=frozenset(["GET", "POST"]),
+    )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -97,11 +130,27 @@ class IRAPIClient:
         health  = client.health()
         datasets = client.list_datasets()
         resp = client.search(dataset="webis-touche2020", query="teacher tenure")
+
+    Can also be used as a context manager to ensure the underlying
+    session is closed::
+
+        with IRAPIClient() as client:
+            ...
     """
 
     def __init__(self, base_url: str = "http://127.0.0.1:8000") -> None:
         self.base_url = base_url.rstrip("/")
         self._session = _build_session()
+
+    def __enter__(self) -> "IRAPIClient":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        """Release the underlying connection pool."""
+        self._session.close()
 
     # ── internal ────────────────────────────────────────────────────────────
 
@@ -109,18 +158,22 @@ class IRAPIClient:
         try:
             resp = self._session.get(f"{self.base_url}{path}", timeout=timeout)
             resp.raise_for_status()
-            # 304 Not Modified → body is empty; treat as a successful cached response
-            # by re-fetching without the cache headers.
-            if resp.status_code == 304 or not resp.content:
-                self._session.headers.pop("If-None-Match", None)
-                self._session.headers.pop("If-Modified-Since", None)
+            if not resp.content:
+                # Defensive retry once for an unexpectedly empty (but 2xx)
+                # body, e.g. a transient proxy hiccup.
                 resp = self._session.get(f"{self.base_url}{path}", timeout=timeout)
                 resp.raise_for_status()
             return resp.json()
         except requests.exceptions.ConnectionError as exc:
-            raise IRAPIError(f"Cannot reach {self.base_url} — is the gateway running?") from exc
+            raise IRAPIError(
+                f"Cannot reach {self.base_url} — is the gateway running?"
+            ) from exc
         except requests.exceptions.HTTPError as exc:
-            raise IRAPIError(f"[{exc.response.status_code}] {exc.response.text}") from exc
+            if exc.response is not None:
+                raise IRAPIError(
+                    f"[{exc.response.status_code}] {exc.response.text}"
+                ) from exc
+            raise IRAPIError(str(exc)) from exc
         except requests.exceptions.RequestException as exc:
             raise IRAPIError(str(exc)) from exc
         except Exception as exc:
@@ -143,9 +196,15 @@ class IRAPIClient:
         except IRAPIError:
             raise
         except requests.exceptions.ConnectionError as exc:
-            raise IRAPIError(f"Cannot reach {self.base_url} — is the gateway running?") from exc
+            raise IRAPIError(
+                f"Cannot reach {self.base_url} — is the gateway running?"
+            ) from exc
         except requests.exceptions.RequestException as exc:
             raise IRAPIError(str(exc)) from exc
+        except Exception as exc:
+            # Catches e.g. JSONDecodeError on a malformed 200 response —
+            # previously this leaked out unwrapped, unlike _get's behavior.
+            raise IRAPIError(f"Unexpected error talking to gateway: {exc}") from exc
 
     # ── Health / Discovery ──────────────────────────────────────────────────
 
@@ -156,12 +215,12 @@ class IRAPIClient:
     def list_datasets(self) -> list[DatasetInfo]:
         """Return all configured datasets with doc counts and model readiness."""
         data = self._get("/api/v1/datasets")
-        return [DatasetInfo(**d) for d in data["datasets"]]
+        return [_to_dataclass(DatasetInfo, d) for d in data["datasets"]]
 
     def get_options(self) -> RetrievalOptions:
         """Return supported modes and default parameter values."""
         data = self._get("/api/v1/options", timeout=5)
-        return RetrievalOptions(**data)
+        return _to_dataclass(RetrievalOptions, data)
 
     # ── Search ──────────────────────────────────────────────────────────────
 
@@ -212,8 +271,10 @@ class IRAPIClient:
             dataset=data["dataset"],
             execution_mode=data["execution_mode"],
             retrieval_mode=data["retrieval_mode"],
-            query_processing=QueryProcessingInfo(**data["query_processing"]),
-            results=[SearchResultItem(**r) for r in data["results"]],
+            query_processing=_to_dataclass(
+                QueryProcessingInfo, data["query_processing"]
+            ),
+            results=[_to_dataclass(SearchResultItem, r) for r in data["results"]],
             total_results=data["total_results"],
         )
 

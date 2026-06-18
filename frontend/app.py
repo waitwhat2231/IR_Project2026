@@ -742,11 +742,14 @@ def render_sidebar() -> dict[str, Any]:
         # ── API Gateway ──────────────────────────────────────────────────
         st.markdown(_section_label("API Gateway", "server"), unsafe_allow_html=True)
 
-        raw_url: str = st.text_input(
-            "gateway_url",
-            value=st.session_state.get("api_url_raw", DEFAULT_API_URL),
-            placeholder="http://127.0.0.1:8000",
-            label_visibility="collapsed",
+        raw_url: str = (
+            st.text_input(
+                "gateway_url",
+                value=st.session_state.get("api_url_raw", DEFAULT_API_URL),
+                placeholder="http://127.0.0.1:8000",
+                label_visibility="collapsed",
+            )
+            or ""
         )
         api_url = _normalize_url(raw_url)
 
@@ -815,11 +818,17 @@ def render_sidebar() -> dict[str, Any]:
             dataset_names = ["webis-touche2020"]
             dataset_labels = {"webis-touche2020": "webis-touche2020 (offline)"}
 
-        dataset: str = st.selectbox(
+        selected_dataset = st.selectbox(
             "dataset",
             options=dataset_names,
-            format_func=lambda x: dataset_labels.get(x, x),
+            format_func=lambda x: str(dataset_labels.get(x, x)),
             label_visibility="collapsed",
+        )
+
+        dataset: str = (
+            selected_dataset
+            if selected_dataset is not None
+            else (dataset_names[0] if dataset_names else "")
         )
 
         st.divider()
@@ -991,11 +1000,14 @@ def main() -> None:
     with st.form("search_form", clear_on_submit=False):
         q_col, btn_col = st.columns([6, 1])
         with q_col:
-            query: str = st.text_input(
-                "query",
-                value=st.session_state.pop("prefill_query", ""),
-                placeholder="Enter your query and press Enter or click Search…",
-                label_visibility="collapsed",
+            query: str = (
+                st.text_input(
+                    "query",
+                    value=st.session_state.pop("prefill_query", ""),
+                    placeholder="Enter your query and press Enter or click Search…",
+                    label_visibility="collapsed",
+                )
+                or ""
             )
         with btn_col:
             submitted: bool = st.form_submit_button(

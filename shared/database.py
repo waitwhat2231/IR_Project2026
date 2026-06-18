@@ -1,6 +1,8 @@
 import os
 from typing import List, Dict, Optional
 from pymongo import MongoClient, ASCENDING
+from pymongo.collection import Collection
+from pymongo.database import Database
 from pymongo.errors import BulkWriteError
 from tqdm import tqdm
 
@@ -24,19 +26,32 @@ class DocumentDatabase:
     - No separate index needed for the most common query pattern
     """
 
-    def __init__(self, uri: str = None, db_name: str = None, collection: str = None):
-        self.uri     = uri or os.getenv("MONGO_URI", MONGO_URI)
-        self.db_name = db_name or MONGO_DB
-        self.coll_name = collection or MONGO_COLL
-        self.client  = None
-        self.db      = None
-        self.coll    = None
+    def __init__(
+        self,
+        uri: Optional[str] = None,
+        db_name: Optional[str] = None,
+        collection: Optional[str] = None,
+    ):
+        self.uri: str = uri or os.getenv("MONGO_URI", MONGO_URI)
+        self.db_name: str = db_name or MONGO_DB
+        self.coll_name: str = collection or MONGO_COLL
+        self.client: Optional[MongoClient] = None
+        self.db: Optional[Database] = None
+        self.coll: Optional[Collection] = None
+
+    @property
+    def _coll(self) -> Collection:
+        """Type-narrowed accessor — asserts connect() has been called."""
+        assert (
+            self.coll is not None
+        ), "DocumentDatabase: call connect() before using the database"
+        return self.coll
 
     def connect(self):
         self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
         # Verify connection
         self.client.admin.command("ping")
-        self.db   = self.client[self.db_name]
+        self.db = self.client[self.db_name]
         self.coll = self.db[self.coll_name]
         # Ensure index on dataset field for filtered queries
         self.coll.create_index([("dataset", ASCENDING)])
@@ -66,20 +81,21 @@ class DocumentDatabase:
         total = len(items)
         inserted = 0
 
-        for i in tqdm(range(0, total, batch_size),
-                      desc=f"Inserting {dataset} into MongoDB"):
+        for i in tqdm(
+            range(0, total, batch_size), desc=f"Inserting {dataset} into MongoDB"
+        ):
             batch = items[i : i + batch_size]
             mongo_docs = [
                 {
-                    "_id":     doc_id,            # doc_id AS the primary key
+                    "_id": doc_id,  # doc_id AS the primary key
                     "dataset": dataset,
-                    "title":   doc.get("title", "")[:2000],    # cap at 2KB
-                    "text":    doc.get("text",  "")[:100000],  # cap at 100KB
+                    "title": doc.get("title", "")[:2000],  # cap at 2KB
+                    "text": doc.get("text", "")[:100000],  # cap at 100KB
                 }
                 for doc_id, doc in batch
             ]
             try:
-                result = self.coll.insert_many(
+                result = self._coll.insert_many(
                     mongo_docs,
                     ordered=False,  # continue on duplicate key errors
                 )
@@ -88,8 +104,10 @@ class DocumentDatabase:
                 # Some docs may already exist — count only new ones
                 inserted += e.details.get("nInserted", 0)
 
-        print(f"Dataset '{dataset}': {inserted:,} new docs inserted "
-              f"(total in collection: {self.count(dataset):,})")
+        print(
+            f"Dataset '{dataset}': {inserted:,} new docs inserted "
+            f"(total in collection: {self.count(dataset):,})"
+        )
 
     # ─── READ (online — called after every retrieval) ────────────
 
@@ -108,34 +126,31 @@ class DocumentDatabase:
 
         Returns: {doc_id: {title, text}}
         """
-        cursor = self.coll.find(
+        cursor = self._coll.find(
             {"_id": {"$in": doc_ids}},
-            {"_id": 1, "title": 1, "text": 1}   # projection: only these fields
+            {"_id": 1, "title": 1, "text": 1},  # projection: only these fields
         )
         return {
             doc["_id"]: {
                 "title": doc.get("title", ""),
-                "text":  doc.get("text",  ""),
+                "text": doc.get("text", ""),
             }
             for doc in cursor
         }
 
     def get_by_id(self, doc_id: str) -> Optional[Dict]:
         """Fetch a single document."""
-        doc = self.coll.find_one(
-            {"_id": doc_id},
-            {"_id": 1, "title": 1, "text": 1}
-        )
+        doc = self._coll.find_one({"_id": doc_id}, {"_id": 1, "title": 1, "text": 1})
         if doc:
             return {"title": doc.get("title", ""), "text": doc.get("text", "")}
         return None
 
-    def count(self, dataset: str = None) -> int:
+    def count(self, dataset: Optional[str] = None) -> int:
         query = {"dataset": dataset} if dataset else {}
-        return self.coll.count_documents(query)
+        return self._coll.count_documents(query)
 
     def dataset_exists(self, dataset: str) -> bool:
-        return self.coll.count_documents({"dataset": dataset}, limit=1) > 0
+        return self._coll.count_documents({"dataset": dataset}, limit=1) > 0
 
 
 # Module-level singleton — import this everywhere

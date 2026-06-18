@@ -14,7 +14,7 @@ Save layout:
 
 import pickle
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, cast
 
 import faiss
 import numpy as np
@@ -24,17 +24,17 @@ from sentence_transformers import SentenceTransformer
 class SBERTRetriever:
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.model_name:     str                         = model_name
-        self.model:          Optional[SentenceTransformer] = None
-        self.doc_embeddings: Optional[np.ndarray]        = None  # (N, 384)
-        self.faiss_index                                 = None
-        self.doc_ids:        List[str]                   = []
+        self.model_name: str = model_name
+        self.model: Optional[SentenceTransformer] = None
+        self.doc_embeddings: Optional[np.ndarray] = None  # (N, 384)
+        self.faiss_index: Optional[faiss.Index] = None
+        self.doc_ids: List[str] = []
 
     # ── Encoding ──────────────────────────────────────────────────────────────
 
     def encode_documents(
         self,
-        docs:       dict,           # {doc_id: "original text"}
+        docs: dict,  # {doc_id: "original text"}
         batch_size: int = 128,
     ):
         """
@@ -53,52 +53,64 @@ class SBERTRetriever:
         if self.model is None:
             print(f"   Loading SBERT model: {self.model_name}")
             import torch
+
             target_device = "cuda" if torch.cuda.is_available() else "cpu"
             print(f"   [*] SentenceTransformer will run on: {target_device.upper()}")
             self.model = SentenceTransformer(self.model_name, device=target_device)
 
         self.doc_ids = list(docs.keys())
-        texts        = list(docs.values())
+        texts = list(docs.values())
 
         print(f"  Encoding {len(texts):,} documents...")
-        print(f"  Batch size: {batch_size}  "
-              f"Est. batches: {len(texts) // batch_size:,}")
-
-        self.doc_embeddings = self.model.encode(
-            texts,
-            batch_size           = batch_size,
-            show_progress_bar    = True,
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
+        print(
+            f"  Batch size: {batch_size}  "
+            f"Est. batches: {len(texts) // batch_size:,}"
         )
-        print(f"  Shape: {self.doc_embeddings.shape}  "
-              f"({self.doc_embeddings.nbytes / 1e6:.1f} MB)")
+
+        embeddings = self.model.encode(
+            texts,
+            batch_size=batch_size,
+            show_progress_bar=True,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        )
+        self.doc_embeddings = cast(np.ndarray, embeddings)
+        print(
+            f"  Shape: {self.doc_embeddings.shape}  "
+            f"({self.doc_embeddings.nbytes / 1e6:.1f} MB)"
+        )
 
         self._build_faiss()
 
     def _build_faiss(self):
-        dim              = self.doc_embeddings.shape[1]   # 384
+        doc_embeddings = self.doc_embeddings
+        assert doc_embeddings is not None, "Embeddings not created!"
+        dim = doc_embeddings.shape[1]  # 384
         self.faiss_index = faiss.IndexFlatIP(dim)
-        self.faiss_index.add(self.doc_embeddings.astype(np.float32))
+        cast(Any, self.faiss_index).add(doc_embeddings.astype(np.float32))
         print(f"  FAISS index: {self.faiss_index.ntotal:,} vectors, dim={dim}")
 
     # ── Retrieval ─────────────────────────────────────────────────────────────
 
     def retrieve(
         self,
-        query_raw: str,     # original query — NOT preprocessed
-        top_k:     int = 10,
+        query_raw: str,  # original query — NOT preprocessed
+        top_k: int = 10,
     ) -> List[Tuple[str, float]]:
         if self.model is None or self.faiss_index is None:
-            raise RuntimeError("SBERTRetriever not ready. Call encode_documents() or load().")
+            raise RuntimeError(
+                "SBERTRetriever not ready. Call encode_documents() or load()."
+            )
 
-        q_emb = self.model.encode(
-            [query_raw],
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
-        ).astype(np.float32)                      # (1, 384)
+        q_emb = np.array(
+            self.model.encode(
+                [query_raw], normalize_embeddings=True, convert_to_numpy=True
+            )
+        ).astype(
+            np.float32
+        )  # (1, 384)
 
-        scores, indices = self.faiss_index.search(q_emb, top_k)
+        scores, indices = cast(Any, self.faiss_index).search(q_emb, top_k)
 
         return [
             (self.doc_ids[idx], float(scores[0][r]))
@@ -110,10 +122,8 @@ class SBERTRetriever:
         """Single embedding — used by hybrid serial reranker."""
         if self.model is None:
             self.model = SentenceTransformer(self.model_name)
-        return self.model.encode(
-            [text],
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
+        return np.array(
+            self.model.encode([text], normalize_embeddings=True, convert_to_numpy=True)
         )[0]
 
     # ── Persistence ───────────────────────────────────────────────────────────
@@ -122,13 +132,15 @@ class SBERTRetriever:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
 
+        assert self.doc_embeddings is not None, "Embeddings not created!"
+        assert self.faiss_index is not None, "FAISS index not created!"
         np.save(save_dir / "doc_embeddings.npy", self.doc_embeddings)
         faiss.write_index(self.faiss_index, str(save_dir / "faiss.index"))
 
         with open(save_dir / "meta.pkl", "wb") as f:
             pickle.dump({"doc_ids": self.doc_ids, "model_name": self.model_name}, f)
 
-        emb_mb   = (save_dir / "doc_embeddings.npy").stat().st_size / 1e6
+        emb_mb = (save_dir / "doc_embeddings.npy").stat().st_size / 1e6
         faiss_mb = (save_dir / "faiss.index").stat().st_size / 1e6
         print(f"  SBERT saved → {save_dir}/")
         print(f"    doc_embeddings.npy : {emb_mb:.1f} MB")
@@ -141,14 +153,16 @@ class SBERTRetriever:
         with open(save_dir / "meta.pkl", "rb") as f:
             meta = pickle.load(f)
 
-        obj                = cls(model_name=meta["model_name"])
-        obj.doc_ids        = meta["doc_ids"]
+        obj = cls(model_name=meta["model_name"])
+        obj.doc_ids = meta["doc_ids"]
         obj.doc_embeddings = np.load(save_dir / "doc_embeddings.npy")
-        obj.faiss_index    = faiss.read_index(str(save_dir / "faiss.index"))
+        obj.faiss_index = faiss.read_index(str(save_dir / "faiss.index"))
 
         print(f"  Loading SBERT model for query encoding: {obj.model_name}")
         obj.model = SentenceTransformer(obj.model_name)
 
         print(f"  SBERT loaded ← {save_dir}/")
+
+        assert obj.doc_embeddings is not None, "Embeddings not created!"
         print(f"    Docs : {len(obj.doc_ids):,}  Dim: {obj.doc_embeddings.shape[1]}")
         return obj

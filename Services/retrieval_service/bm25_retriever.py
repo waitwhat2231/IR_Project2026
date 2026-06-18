@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 import sys
+
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from shared.config import MODEL_DIR
@@ -51,10 +52,10 @@ class BM25Retriever:
           For long debate documents it prevents verbose posts from
           dominating over concise, focused ones.
         """
-        self.k1:          float                        = k1
-        self.b:           float                        = b
-        self.dataset_name: Optional[str]               = None
-        self.idx:         Optional[InvertedIndexManager] = None
+        self.k1: float = k1
+        self.b: float = b
+        self.dataset_name: Optional[str] = None
+        self.idx: Optional[InvertedIndexManager] = None
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -84,29 +85,32 @@ class BM25Retriever:
     def _score(
         self,
         query_tokens: List[str],
-        k1:           float,
-        b:            float,
+        k1: float,
+        b: float,
     ) -> Dict[str, float]:
         """
         Computes BM25 scores for all documents containing at least one
         query term. Documents in no posting list stay at 0 and are
         never inserted into the dict — efficient for large corpora.
         """
+        assert self.idx is not None, "InvertedIndexManager not loaded!"
         scores: Dict[str, float] = {}
         avg_dl = self.idx.avg_dl
 
         for term in query_tokens:
-            postings = self.idx.get_postings(term)   # {doc_id: tf}
+            postings = self.idx.get_postings(term)  # {doc_id: tf}
             if not postings:
                 continue
 
             idf = self.idx.idf(term)
 
             for doc_id, tf in postings.items():
-                doc_len     = self.idx.doc_lengths.get(doc_id, avg_dl)
-                numerator   = tf * (k1 + 1)
+                doc_len = self.idx.doc_lengths.get(doc_id, avg_dl)
+                numerator = tf * (k1 + 1)
                 denominator = tf + k1 * (1 - b + b * doc_len / avg_dl)
-                scores[doc_id] = scores.get(doc_id, 0.0) + idf * (numerator / denominator)
+                scores[doc_id] = scores.get(doc_id, 0.0) + idf * (
+                    numerator / denominator
+                )
 
         return scores
 
@@ -114,13 +118,13 @@ class BM25Retriever:
         if not scores:
             return []
         doc_ids_arr = list(scores.keys())
-        scores_arr  = np.array(list(scores.values()), dtype=np.float32)
+        scores_arr = np.array(list(scores.values()), dtype=np.float32)
 
         if top_k >= len(scores_arr):
             top_i = np.argsort(scores_arr)[::-1]
         else:
             top_i_part = np.argpartition(scores_arr, -top_k)[-top_k:]
-            top_i      = top_i_part[np.argsort(scores_arr[top_i_part])[::-1]]
+            top_i = top_i_part[np.argsort(scores_arr[top_i_part])[::-1]]
 
         return [(doc_ids_arr[i], float(scores_arr[i])) for i in top_i]
 
@@ -129,7 +133,7 @@ class BM25Retriever:
     def retrieve(
         self,
         query_tokens: List[str],
-        top_k:        int = 10,
+        top_k: int = 10,
     ) -> List[Tuple[str, float]]:
         """
         query_tokens: preprocessed tokens from TextPreprocessor.
@@ -142,9 +146,9 @@ class BM25Retriever:
     def retrieve_with_params(
         self,
         query_tokens: List[str],
-        k1:           float,
-        b:            float,
-        top_k:        int = 10,
+        k1: float,
+        b: float,
+        top_k: int = 10,
     ) -> List[Tuple[str, float]]:
         """
         Retrieve with custom k1/b without changing self.k1/self.b.
@@ -157,7 +161,7 @@ class BM25Retriever:
     def retrieve_batch(
         self,
         queries: Dict[str, List[str]],
-        top_k:   int = 1000,
+        top_k: int = 1000,
     ) -> Dict[str, List[Tuple[str, float]]]:
         """Batch retrieval for evaluation. queries: {qid: [tokens]}"""
         return {qid: self.retrieve(tokens, top_k) for qid, tokens in queries.items()}
@@ -176,11 +180,14 @@ class BM25Retriever:
 
         config_path = save_dir / "bm25_config.pkl"
         with open(config_path, "wb") as f:
-            pickle.dump({
-                "dataset_name": self.dataset_name,
-                "k1":           self.k1,
-                "b":            self.b,
-            }, f)
+            pickle.dump(
+                {
+                    "dataset_name": self.dataset_name,
+                    "k1": self.k1,
+                    "b": self.b,
+                },
+                f,
+            )
 
         print(f"  BM25 saved → {config_path}")
         print(f"    dataset: {self.dataset_name}  k1={self.k1}  b={self.b}")
@@ -190,7 +197,7 @@ class BM25Retriever:
         """
         Loads config, then re-attaches to the InvertedIndexManager.
         """
-        save_dir    = Path(save_dir)
+        save_dir = Path(save_dir)
         config_path = save_dir / "bm25_config.pkl"
 
         if not config_path.exists():
