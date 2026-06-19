@@ -40,8 +40,8 @@ preprocessed, indexed, and embedded into several representations — from an **o
 serving phase** — where a FastAPI gateway loads the prebuilt artifacts and answers
 queries in real time.
 
-The retrieval layer is deliberately pluralistic: it exposes a *sparse lexical* family
-(BM25, TF-IDF), a *dense semantic* family (SBERT, Word2Vec), and *hybrid* combinations
+The retrieval layer is deliberately pluralistic: it exposes a _sparse lexical_ family
+(BM25, TF-IDF), a _dense semantic_ family (SBERT, Word2Vec), and _hybrid_ combinations
 of the two via score-level fusion (parallel) and cascade reranking (serial). A separate
 evaluation service grades every model against expert relevance judgments using the
 standard IR metrics required by the course (MAP, Recall, Precision@10, nDCG). The system
@@ -82,12 +82,12 @@ indexes (slow, run once) and **serving** queries against them (fast, run continu
 
 - **Service-oriented architecture (SOA).** Each capability (preprocessing, indexing,
   retrieval, query refinement, evaluation, clustering) lives in its own package under
-  `Services/`, with a single FastAPI *gateway* acting as the public entry point.
+  `Services/`, with a single FastAPI _gateway_ acting as the public entry point.
 - **Offline/online split.** Expensive work (encoding 382K documents with SBERT, training
   Word2Vec, building the inverted index) happens once and is persisted to `data/`. The
-  online path only *loads* these artifacts.
+  online path only _loads_ these artifacts.
 - **Memory-safe streaming.** The corpus is too large to hold raw + processed + indexed in
-  RAM simultaneously, so preprocessing writes a *multi-block pickle stream* that every
+  RAM simultaneously, so preprocessing writes a _multi-block pickle stream_ that every
   downstream step consumes chunk-by-chunk (`shared/pickle_stream.py`).
 - **Separation of scores and content.** Retrievers return only `(doc_id, score)` pairs;
   the original document title/text is fetched separately from MongoDB at display time.
@@ -98,13 +98,13 @@ indexes (slow, run once) and **serving** queries against them (fast, run continu
 
 ### Platform
 
-| Component        | Recommendation                                                        |
-| ---------------- | --------------------------------------------------------------------- |
-| OS               | Windows 10/11, Linux, or macOS (developed on Windows 10 + PowerShell) |
-| Python           | 3.10 (Conda environment named `ir_project` is assumed by the docs)    |
-| RAM              | ≥ 8 GB (offline peaks ~4–5 GB; SBERT encoding benefits from a GPU)    |
-| MongoDB          | 7.x (via Docker, or a local install)                                  |
-| Node.js          | Only for the optional React frontend in `web/`                        |
+| Component | Recommendation                                                        |
+| --------- | --------------------------------------------------------------------- |
+| OS        | Windows 10/11, Linux, or macOS (developed on Windows 10 + PowerShell) |
+| Python    | 3.10 (Conda environment named `ir_project` is assumed by the docs)    |
+| RAM       | ≥ 8 GB (offline peaks ~4–5 GB; SBERT encoding benefits from a GPU)    |
+| MongoDB   | 7.x (via Docker, or a local install)                                  |
+| Node.js   | Frontend in `web/`                                                    |
 
 ### Python packages
 
@@ -141,6 +141,7 @@ urllib3>=2.0.0
 
 > **NLTK data.** First run requires downloading NLTK corpora: `punkt`, `stopwords`,
 > and `wordnet`. From Python:
+>
 > ```python
 > import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')
 > ```
@@ -264,11 +265,11 @@ argument-retrieval benchmark from the BEIR suite. It comprises:
 
 `offline/step1_download.py` retrieves three artifacts per dataset via `ir_datasets`:
 
-| File                          | Contents                                                  |
-| ----------------------------- | --------------------------------------------------------- |
-| `data/raw/<name>/docs.pkl`    | `{doc_id: {"title": str, "text": str}}`                   |
-| `data/raw/<name>/queries.json`| `{query_id: "query text"}`                                |
-| `data/raw/<name>/qrels.json`  | `{query_id: {doc_id: relevance_grade}}`                   |
+| File                           | Contents                                |
+| ------------------------------ | --------------------------------------- |
+| `data/raw/<name>/docs.pkl`     | `{doc_id: {"title": str, "text": str}}` |
+| `data/raw/<name>/queries.json` | `{query_id: "query text"}`              |
+| `data/raw/<name>/qrels.json`   | `{query_id: {doc_id: relevance_grade}}` |
 
 Adding another dataset is a one-line change to the `DATASETS` map in `shared/config.py`,
 after which the whole pipeline can be re-run for it.
@@ -294,23 +295,23 @@ step1 (raw docs/queries/qrels)
 
 ### Step-by-step
 
-| Step | Script | Purpose | Reads | Writes |
-| ---- | ------ | ------- | ----- | ------ |
-| 1 | `step1_download.py` | Download corpus from BEIR | (network) | `data/raw/<name>/{docs.pkl, queries.json, qrels.json}` |
-| 2 | `step2_preprocess.py` | Normalise → tokenise → stopword-remove → Porter-stem; streams output in 20K-doc blocks | `raw/docs.pkl`, `raw/queries.json` | `processed/<name>/processed_docs.pkl` (multi-block), `processed_queries.json` |
-| 3 | `step3_build_inverted_index.py` | Build `term → {doc_id: tf}` postings + `df`, `N`, `avg_dl`, doc lengths | `processed_docs.pkl` | `indexes/<name>_inverted.pkl` |
-| 4 | `step4_train_tfidf.py` | Fit `TfidfVectorizer`, build sparse doc matrix | `processed_docs.pkl` (`processed_str`) | `models/tfidf_<name>_matrix.npz`, `_meta.pkl` |
-| 5 | `step5_train_sbert.py` | Encode raw `title+text` (truncated ~512 chars) with SBERT, build FAISS index | `raw/docs.pkl` | `models/sbert_<name>/{doc_embeddings.npy, faiss.index, meta.pkl}` |
-| 6 | `step6_train_word2vec.py` | Train Word2Vec on token streams, precompute mean doc vectors | `processed_docs.pkl` (`processed_tokens`) | `models/word2vec_<name>/{word2vec.model, doc_embeddings.npy, doc_ids.pkl}` |
-| 7 | `step7_train_bm25.py` | Lock `k1`/`b`, verify index, parameter-sensitivity report | `indexes/<name>_inverted.pkl` | `models/bm25_<name>/{bm25_config.pkl, parameter_sensitivity.json}` |
-| 8 | `step8_verify_hybrid.py` | Smoke-test parallel + serial hybrid retrieval | all model dirs | (nothing — prints only) |
-| 9 | `step9_load_to_mongodb.py` | Upsert original document text into MongoDB for display | `raw/docs.pkl` | MongoDB `ir_system.documents` |
-| 10 | `step10_cluster.py` | MiniBatchKMeans over SBERT embeddings, top-terms, 2-D scatter (UMAP/PCA) | `sbert_<name>/`, `processed_docs.pkl` | `models/clusters_<name>/{clusters.json, doc_cluster_map.pkl, scatter_2d.json}` |
+| Step | Script                          | Purpose                                                                                | Reads                                     | Writes                                                                         |
+| ---- | ------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------ |
+| 1    | `step1_download.py`             | Download corpus from BEIR                                                              | (network)                                 | `data/raw/<name>/{docs.pkl, queries.json, qrels.json}`                         |
+| 2    | `step2_preprocess.py`           | Normalise → tokenise → stopword-remove → Porter-stem; streams output in 20K-doc blocks | `raw/docs.pkl`, `raw/queries.json`        | `processed/<name>/processed_docs.pkl` (multi-block), `processed_queries.json`  |
+| 3    | `step3_build_inverted_index.py` | Build `term → {doc_id: tf}` postings + `df`, `N`, `avg_dl`, doc lengths                | `processed_docs.pkl`                      | `indexes/<name>_inverted.pkl`                                                  |
+| 4    | `step4_train_tfidf.py`          | Fit `TfidfVectorizer`, build sparse doc matrix                                         | `processed_docs.pkl` (`processed_str`)    | `models/tfidf_<name>_matrix.npz`, `_meta.pkl`                                  |
+| 5    | `step5_train_sbert.py`          | Encode raw `title+text` (truncated ~512 chars) with SBERT, build FAISS index           | `raw/docs.pkl`                            | `models/sbert_<name>/{doc_embeddings.npy, faiss.index, meta.pkl}`              |
+| 6    | `step6_train_word2vec.py`       | Train Word2Vec on token streams, precompute mean doc vectors                           | `processed_docs.pkl` (`processed_tokens`) | `models/word2vec_<name>/{word2vec.model, doc_embeddings.npy, doc_ids.pkl}`     |
+| 7    | `step7_train_bm25.py`           | Lock `k1`/`b`, verify index, parameter-sensitivity report                              | `indexes/<name>_inverted.pkl`             | `models/bm25_<name>/{bm25_config.pkl, parameter_sensitivity.json}`             |
+| 8    | `step8_verify_hybrid.py`        | Smoke-test parallel + serial hybrid retrieval                                          | all model dirs                            | (nothing — prints only)                                                        |
+| 9    | `step9_load_to_mongodb.py`      | Upsert original document text into MongoDB for display                                 | `raw/docs.pkl`                            | MongoDB `ir_system.documents`                                                  |
+| 10   | `step10_cluster.py`             | MiniBatchKMeans over SBERT embeddings, top-terms, 2-D scatter (UMAP/PCA)               | `sbert_<name>/`, `processed_docs.pkl`     | `models/clusters_<name>/{clusters.json, doc_cluster_map.pkl, scatter_2d.json}` |
 
 ### Key implementation detail — memory-safe streaming
 
 The corpus cannot be held in memory in all its forms at once. `step2` therefore writes
-`processed_docs.pkl` as a *sequence* of pickled blocks (≤ 20,000 documents each). Downstream
+`processed_docs.pkl` as a _sequence_ of pickled blocks (≤ 20,000 documents each). Downstream
 steps consume it via `shared/pickle_stream.py`, which repeatedly calls `pickle.load()` until
 `EOFError`, yielding one block at a time so only a single chunk lives in RAM:
 
@@ -332,17 +333,17 @@ fully open so any frontend can call it.
 
 Endpoints:
 
-| Method | Path                          | Purpose                                          |
-| ------ | ----------------------------- | ------------------------------------------------ |
-| GET    | `/health`                     | Liveness + Mongo connectivity + loaded clusters  |
-| GET    | `/api/v1/datasets`            | Datasets with doc counts and model readiness     |
-| GET    | `/api/v1/options`             | Supported modes + default parameters             |
-| POST   | `/api/v1/search`              | Execute a search                                 |
-| GET    | `/api/v1/suggestions`         | Autocomplete from search history                 |
-| GET    | `/api/v1/evaluation`          | One phase's evaluation summary                    |
-| GET    | `/api/v1/evaluation/compare`  | baseline vs. enhanced side by side               |
-| GET    | `/api/v1/clusters`            | Cluster summaries (sizes, top terms, reps)        |
-| GET    | `/api/v1/clusters/scatter`    | ~10K-point 2-D sample for visualisation          |
+| Method | Path                         | Purpose                                         |
+| ------ | ---------------------------- | ----------------------------------------------- |
+| GET    | `/health`                    | Liveness + Mongo connectivity + loaded clusters |
+| GET    | `/api/v1/datasets`           | Datasets with doc counts and model readiness    |
+| GET    | `/api/v1/options`            | Supported modes + default parameters            |
+| POST   | `/api/v1/search`             | Execute a search                                |
+| GET    | `/api/v1/suggestions`        | Autocomplete from search history                |
+| GET    | `/api/v1/evaluation`         | One phase's evaluation summary                  |
+| GET    | `/api/v1/evaluation/compare` | baseline vs. enhanced side by side              |
+| GET    | `/api/v1/clusters`           | Cluster summaries (sizes, top terms, reps)      |
+| GET    | `/api/v1/clusters/scatter`   | ~10K-point 2-D sample for visualisation         |
 
 ### The Search Pipeline (`Services/gateway/search_pipeline.py`)
 
@@ -364,19 +365,46 @@ Endpoints:
 
 ### Frontends
 
-Two interchangeable UIs talk to the same gateway:
+Two interchangeable UIs talk to the same gateway, and both respect the same hard rule: never let a
+search fire while `/api/v1/datasets` is still loading the corpus and every representation into
+memory, since that is the single most reliable way to exhaust RAM mid-demo.
 
 - **Streamlit** (`frontend/app.py`) — a polished single-page console with a typed HTTP client
   (`frontend/api_client.py`). Good for quick demos. Run with `streamlit run frontend/app.py`.
-- **React 19 + TypeScript** (`web/`) — a richer SPA (Vite, TanStack Query, Zustand, Tailwind).
-  See `web/README.md` for details.
+
+- **React 19 + TypeScript** (`web/`) — a three-view SPA (Vite, Tailwind v4, TanStack Query,
+  Zustand, Motion, Lucide, Recharts) built around what the grader needs to verify, not just what
+  looks polished:
+
+  - **Search** — a search-engine-style home screen that compresses into a results layout on the
+    first query. Nothing `/api/v1/search` returns is hidden or summarised: the raw `doc_id` is shown
+    verbatim and copyable (for cross-checking against the dataset's qrels file by hand), the score is
+    rendered at full floating-point precision, the `cluster_id` badge appears wherever clustering has
+    annotated a result, and a collapsible panel exposes the entire `query_processing` trace (original
+    vs. processed query, spell-correction flag, expansion terms, tokens). Every result list also
+    carries a raw-JSON toggle that dumps the literal API response. Model configuration — execution
+    mode, retrieval mode, BM25 `k1`/`b`, hybrid sparse/dense legs, `alpha`, `cascade_top_n`, `top_k`,
+    snippet length — lives in a slide-out settings panel so it never clutters the results themselves.
+  - **Evaluation** — calls `/api/v1/evaluation/compare` on demand (never automatically) and puts
+    MAP and nDCG front and center per the course's grading emphasis, with every other reported metric
+    (Recall, P@10, …) available as a chart toggle. Baseline and enhanced phases are plotted side by
+    side per model, so the required before/after comparison is one screen instead of a manual diff
+    between two JSON files.
+  - **Clusters** — Browse and Map tabs sharing one selection state: a card grid (size, % of corpus,
+    top discriminative terms, representative `doc_id`s) and a 2-D UMAP scatter
+    (`/api/v1/clusters/scatter`) colour-coded by cluster, where selecting a card highlights its points
+    on the map and vice versa. The heavier ~10K-point scatter sample is fetched only once the Map tab
+    is actually opened, while the lightweight cluster summaries load as soon as the dataset is ready.
+
+  See `web/README.md` for the architecture write-up — the service-layer pattern mirroring the
+  backend's SOA boundaries, the dataset-loading hard-gate, and the state-management choices.
 
 ---
 
 ## 8. Retrieval Models — Theory & Implementation
 
-The system implements two **representation families** required by the course — *sparse
-lexical* and *dense semantic* — plus two ways of combining them.
+The system implements two **representation families** required by the course — _sparse
+lexical_ and _dense semantic_ — plus two ways of combining them.
 
 ### 8.1 BM25 (Okapi, probabilistic)
 
@@ -409,7 +437,7 @@ Sentence-BERT (`all-MiniLM-L6-v2`, 384-dim) encodes raw `title+text` into L2-nor
 embeddings. Search uses a **FAISS** index with inner-product metric (equivalent to cosine on
 unit vectors). Three index types are supported — exact `flat`, `ivf` (k-means coarse
 quantiser), and `hnsw` (graph ANN, the default) — trading recall for speed. Unlike the sparse
-models, SBERT consumes the *original* query text, not stemmed tokens, because the transformer
+models, SBERT consumes the _original_ query text, not stemmed tokens, because the transformer
 performs its own subword tokenisation.
 
 ### 8.4 Word2Vec (dense, corpus-trained)
@@ -421,7 +449,7 @@ preprocessed `processed_tokens`.
 
 ### 8.5 Hybrid — Parallel Fusion
 
-`HybridRetriever.retrieve_hybrid` runs a sparse and a dense retriever *independently*, then
+`HybridRetriever.retrieve_hybrid` runs a sparse and a dense retriever _independently_, then
 fuses their result lists. Two fusion modes exist:
 
 - **Min-max (default).** Each list's scores are min-max normalised to `[0, 1]`, then combined
@@ -436,14 +464,14 @@ sparse model (BM25 or TF-IDF) selects the top `cascade_top_n` candidates (defaul
 are then reordered by a dense model (SBERT or Word2Vec). This pairs lexical recall with
 semantic precision at lower cost than scoring the whole corpus densely.
 
-| Mode              | Sparse stage | Dense stage | Combination               |
-| ----------------- | ------------ | ----------- | ------------------------- |
-| `bm25`            | BM25         | —           | lexical only              |
-| `tfidf`           | TF-IDF       | —           | lexical only              |
-| `sbert`           | —            | SBERT       | semantic only             |
-| `word2vec`        | —            | Word2Vec    | semantic only             |
-| `hybrid_parallel` | BM25/TF-IDF  | SBERT/W2V   | weighted score fusion     |
-| `hybrid_serial`   | BM25/TF-IDF  | SBERT/W2V   | candidate set → rerank    |
+| Mode              | Sparse stage | Dense stage | Combination            |
+| ----------------- | ------------ | ----------- | ---------------------- |
+| `bm25`            | BM25         | —           | lexical only           |
+| `tfidf`           | TF-IDF       | —           | lexical only           |
+| `sbert`           | —            | SBERT       | semantic only          |
+| `word2vec`        | —            | Word2Vec    | semantic only          |
+| `hybrid_parallel` | BM25/TF-IDF  | SBERT/W2V   | weighted score fusion  |
+| `hybrid_serial`   | BM25/TF-IDF  | SBERT/W2V   | candidate set → rerank |
 
 ---
 
@@ -494,40 +522,40 @@ The **Ranking & Evaluation Service** (`Services/ranking_evaluation_service/`) gr
 retrieval model against the dataset's qrels using standard IR metrics. It is split into three
 files by responsibility:
 
-| File           | Role                                                          |
-| -------------- | ------------------------------------------------------------ |
-| `scorer.py`    | Pure metric math (no I/O): P@k, Recall@k, AP, nDCG@k          |
-| `evaluator.py` | Builds per-model runs, scores them, writes reports           |
-| `main.py`      | CLI entry point — loads models, evaluates, prints + saves     |
+| File           | Role                                                      |
+| -------------- | --------------------------------------------------------- |
+| `scorer.py`    | Pure metric math (no I/O): P@k, Recall@k, AP, nDCG@k      |
+| `evaluator.py` | Builds per-model runs, scores them, writes reports        |
+| `main.py`      | CLI entry point — loads models, evaluates, prints + saves |
 
 ### Metrics
 
-| Metric        | Question it answers                                                |
-| ------------- | ----------------------------------------------------------------- |
-| **MAP**       | Are relevant docs ranked near the top, averaged over all queries? |
-| **Recall@1000** | What fraction of all relevant docs were retrieved?              |
-| **P@10**      | Of the top 10 results, how many are relevant?                     |
-| **nDCG@10**   | Like P@10 but rewards placing the *most* relevant docs first.     |
+| Metric          | Question it answers                                               |
+| --------------- | ----------------------------------------------------------------- |
+| **MAP**         | Are relevant docs ranked near the top, averaged over all queries? |
+| **Recall@1000** | What fraction of all relevant docs were retrieved?                |
+| **P@10**        | Of the top 10 results, how many are relevant?                     |
+| **nDCG@10**     | Like P@10 but rewards placing the _most_ relevant docs first.     |
 
 A document counts as relevant when its qrel grade is ≥ 1; nDCG uses the graded values directly.
 Each metric is computed per query and then averaged across the 49 queries.
 
 ### Phases (before/after)
 
-The `--phase` flag (`baseline` | `enhanced`) lets the same harness measure the system *before*
-and *after* enabling extra features, saving each into its own folder so the gateway's
+The `--phase` flag (`baseline` | `enhanced`) lets the same harness measure the system _before_
+and _after_ enabling extra features, saving each into its own folder so the gateway's
 `/api/v1/evaluation/compare` endpoint can show them side by side.
 
 ### Reported baseline results (49 queries)
 
-| model              | MAP        | Recall@1000 | P@10       | nDCG@10    |
-| ------------------ | ---------- | ----------- | ---------- | ---------- |
-| tfidf              | 0.0520     | 0.7330      | 0.0673     | 0.0566     |
-| **bm25**           | **0.2194** | 0.8726      | **0.2898** | **0.3172** |
-| sbert              | 0.1312     | 0.7706      | 0.1673     | 0.1709     |
-| word2vec           | 0.1017     | 0.7441      | 0.1347     | 0.1561     |
-| hybrid_parallel    | 0.2137     | **0.8784**  | 0.2653     | 0.2903     |
-| hybrid_serial      | 0.1431     | 0.8708      | 0.1755     | 0.1781     |
+| model           | MAP        | Recall@1000 | P@10       | nDCG@10    |
+| --------------- | ---------- | ----------- | ---------- | ---------- |
+| tfidf           | 0.0520     | 0.7330      | 0.0673     | 0.0566     |
+| **bm25**        | **0.2194** | 0.8726      | **0.2898** | **0.3172** |
+| sbert           | 0.1312     | 0.7706      | 0.1673     | 0.1709     |
+| word2vec        | 0.1017     | 0.7441      | 0.1347     | 0.1561     |
+| hybrid_parallel | 0.2137     | **0.8784**  | 0.2653     | 0.2903     |
+| hybrid_serial   | 0.1431     | 0.8708      | 0.1755     | 0.1781     |
 
 **Interpretation.** On this argument-retrieval collection BM25 is the strongest single model
 across MAP/P@10/nDCG, while hybrid_parallel achieves the highest total recall — consistent with
@@ -619,14 +647,14 @@ python offline/interactive_search.py
 {
   "dataset": "webis-touche2020",
   "query": "should teachers get tenure",
-  "execution_mode": "basic",            // "basic" | "enhanced"
-  "retrieval_mode": "hybrid_parallel",  // bm25|tfidf|sbert|word2vec|hybrid_parallel|hybrid_serial
-  "sparse_method": "bm25",              // "bm25" | "tfidf"  (hybrid only)
-  "dense_method": "sbert",              // "sbert" | "word2vec" (hybrid only)
+  "execution_mode": "basic", // "basic" | "enhanced"
+  "retrieval_mode": "hybrid_parallel", // bm25|tfidf|sbert|word2vec|hybrid_parallel|hybrid_serial
+  "sparse_method": "bm25", // "bm25" | "tfidf"  (hybrid only)
+  "dense_method": "sbert", // "sbert" | "word2vec" (hybrid only)
   "bm25_k1": 1.5,
   "bm25_b": 0.75,
-  "alpha": 0.5,                          // parallel fusion weight (sparse↔dense)
-  "cascade_top_n": 200,                  // serial cascade candidate count
+  "alpha": 0.5, // parallel fusion weight (sparse↔dense)
+  "cascade_top_n": 200, // serial cascade candidate count
   "top_k": 10,
   "include_snippet_chars": 300
 }
@@ -673,23 +701,23 @@ Original document **text is stored in MongoDB**, not on disk, and is fetched at 
 
 ## 15. Glossary
 
-| Term | Meaning |
-| ---- | ------- |
-| **BM25** | Okapi BM25, a probabilistic lexical ranking function with TF saturation (`k1`) and length normalisation (`b`). |
-| **TF-IDF** | Term Frequency–Inverse Document Frequency weighting in a vector space model. |
-| **SBERT** | Sentence-BERT; produces sentence-level dense embeddings for semantic search. |
-| **Word2Vec** | Neural word-embedding model; documents represented as the mean of word vectors. |
-| **FAISS** | Facebook AI Similarity Search — fast (approximate) nearest-neighbour index for dense vectors. |
-| **Inverted index** | Map from each term to the documents (and frequencies) in which it appears. |
-| **qrels** | Query relevance judgments — the human-labelled answer key for evaluation. |
-| **MAP / nDCG / P@k / Recall** | Standard IR effectiveness metrics (see §11). |
-| **Parallel fusion** | Combining independent sparse + dense result lists by weighted/RRF score fusion. |
-| **Serial cascade** | Retrieve-then-rerank: a cheap model selects candidates, a richer model reorders them. |
-| **Hydration** | Attaching original title/text (from MongoDB) to retrieved `doc_id`s for display. |
-| **SOA** | Service-Oriented Architecture — each capability isolated behind a service boundary. |
+| Term                          | Meaning                                                                                                        |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **BM25**                      | Okapi BM25, a probabilistic lexical ranking function with TF saturation (`k1`) and length normalisation (`b`). |
+| **TF-IDF**                    | Term Frequency–Inverse Document Frequency weighting in a vector space model.                                   |
+| **SBERT**                     | Sentence-BERT; produces sentence-level dense embeddings for semantic search.                                   |
+| **Word2Vec**                  | Neural word-embedding model; documents represented as the mean of word vectors.                                |
+| **FAISS**                     | Facebook AI Similarity Search — fast (approximate) nearest-neighbour index for dense vectors.                  |
+| **Inverted index**            | Map from each term to the documents (and frequencies) in which it appears.                                     |
+| **qrels**                     | Query relevance judgments — the human-labelled answer key for evaluation.                                      |
+| **MAP / nDCG / P@k / Recall** | Standard IR effectiveness metrics (see §11).                                                                   |
+| **Parallel fusion**           | Combining independent sparse + dense result lists by weighted/RRF score fusion.                                |
+| **Serial cascade**            | Retrieve-then-rerank: a cheap model selects candidates, a richer model reorders them.                          |
+| **Hydration**                 | Attaching original title/text (from MongoDB) to retrieved `doc_id`s for display.                               |
+| **SOA**                       | Service-Oriented Architecture — each capability isolated behind a service boundary.                            |
 
 ---
 
-*Damascus University · Information Retrieval 2026 · This guide documents the system as
+_Damascus University · Information Retrieval 2026 · This guide documents the system as
 implemented in this repository. Where the committed `requirements.txt` covers only the
-gateway, §3 lists the complete dependency set needed to reproduce the full pipeline.*
+gateway, §3 lists the complete dependency set needed to reproduce the full pipeline._

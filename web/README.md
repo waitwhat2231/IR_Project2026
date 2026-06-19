@@ -60,7 +60,7 @@ src/
 
 ### Service-layer pattern (mirrors backend SOA)
 
-The frontend can't literally *be* SOA (it's one bundle in one tab), but `src/api/endpoints/` mirrors the backend's service boundaries: one module per responsibility (`system`, `search`, `suggestions`), each owning its own types and error handling, talking only to the Gateway — never assuming knowledge of individual backend services. This is a frontend service-layer pattern, called out honestly as that rather than claimed as literal SOA.
+The frontend can't literally _be_ SOA (it's one bundle in one tab), but `src/api/endpoints/` mirrors the backend's service boundaries: one module per responsibility (`system`, `search`, `suggestions`), each owning its own types and error handling, talking only to the Gateway — never assuming knowledge of individual backend services. This is a frontend service-layer pattern, called out honestly as that rather than claimed as literal SOA.
 
 ### Why `/api/v1/datasets` hard-gates the whole app
 
@@ -69,6 +69,7 @@ That endpoint loads the dataset and every representation (TF-IDF, BM25, SBERT, W
 ### Raw data philosophy
 
 Per the grading requirement (qrels cross-referencing by `doc_id`), nothing returned by `/api/v1/search` is hidden or cleaned for display:
+
 - Every result shows its raw `doc_id` (copyable) and full-precision `score`.
 - `text` is never silently truncated — long bodies get a "Show full text" expand.
 - `query_processing` (original vs. processed query, spell correction, expansions, tokens) is shown in full.
@@ -80,6 +81,6 @@ No evaluation endpoint exists yet — `components/evaluation/EvaluationView.tsx`
 
 ## Environment
 
-| Variable | Default | Description |
-|---|---|---|
+| Variable           | Default                 | Description                    |
+| ------------------ | ----------------------- | ------------------------------ |
 | `VITE_GATEWAY_URL` | `http://127.0.0.1:8000` | Base URL of `Services/gateway` |
