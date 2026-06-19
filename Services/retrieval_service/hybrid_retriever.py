@@ -120,48 +120,95 @@ class HybridRetriever:
         return sorted(hybrid_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
     # ─── النوع الثاني: التمثيل التسلسلي المكتمل (Serial / Cascade Representation) ───
-    def retrieve_serial(
+    # def retrieve_serial(
+    #     self,
+    #     query_raw: str,
+    #     query_tokens: List[str],
+    #     sparse_method: str = "bm25",
+    #     dense_method: str = "sbert",
+    #     cascade_top_n: int = 200,  # عدد المستندات الممررة للمرحلة الثانية للـ Reranking
+    #     top_k: int = 10,
+    #     custom_bm25_params: Optional[Tuple[float, float]] = None
+    # ) -> List[Tuple[str, float]]:
+    #     """Executes serial multi-stage retrieval (Sparse Filter -> Dense Reranker)."""
+    #     # المرحلة 1: تصفية أولية سريعة باستخدام الموديل النصي (جلب عدد cascade_top_n من الوثائق)
+    #     if sparse_method == "bm25" and self.bm25:
+    #         k1, b = custom_bm25_params if custom_bm25_params else (1.2, 0.75)
+    #         candidate_docs = self._compute_custom_bm25(query_tokens, k1=k1, b=b, top_k=cascade_top_n)
+    #     elif sparse_method == "tfidf" and self.tfidf:
+    #         candidate_docs = self.tfidf.retrieve(" ".join(query_tokens), top_k=cascade_top_n)
+    #     else:
+    #         return []
+
+    #     if not candidate_docs:
+    #         return []
+
+    #     candidate_ids = [doc_id for doc_id, _ in candidate_docs]
+
+    #     # المرحلة 2: إعادة ترتيب (Reranking) للوثائق المرشحة فقط باستخدام الـ Embedding المختار
+    #     reranked_scores: Dict[str, float] = {}
+        
+    #     if dense_method == "sbert" and self.sbert:
+    #         # نقوم بحساب التشابه مع الاستعلام للوثائق المرشحة فقط عبر الفهرس
+    #         # لتبسيط العملية وتجنب الـ Full-scan، نأخذ سكور الـ SBERT المباشر لهذه الـ IDs
+    #         all_sbert_res = self.sbert.retrieve(query_raw, top_k=len(self.sbert.doc_ids))
+    #         sbert_lookup = {d_id: score for d_id, score in all_sbert_res}
+    #         for d_id in candidate_ids:
+    #             reranked_scores[d_id] = sbert_lookup.get(d_id, 0.0)
+                
+    #     elif dense_method == "w2v" and self.w2v:
+    #         all_w2v_res = self.w2v.retrieve(query_tokens, top_k=len(self.w2v.doc_ids))
+    #         w2v_lookup = {d_id: score for d_id, score in all_w2v_res}
+    #         for d_id in candidate_ids:
+    #             reranked_scores[d_id] = w2v_lookup.get(d_id, 0.0)
+
+    #     # ترتيب النتائج النهائية بناءً على سكور إعادة الترتيب الدلالي
+    #     sorted_serial = sorted(reranked_scores.items(), key=lambda x: x[1], reverse=True)
+    #     return sorted_serial[:top_k]
+
+    # ─── النوع الأول: التمثيل التوازي المطوّر (Parallel Representation with RRF Option) ───
+    def retrieve_hybrid(
         self,
         query_raw: str,
         query_tokens: List[str],
-        sparse_method: str = "bm25",
-        dense_method: str = "sbert",
-        cascade_top_n: int = 200,  # عدد المستندات الممررة للمرحلة الثانية للـ Reranking
+        sparse_method: str = "bm25",  
+        dense_method: str = "sbert",  
+        alpha: float = 0.5,            
         top_k: int = 10,
-        custom_bm25_params: Optional[Tuple[float, float]] = None
+        custom_bm25_params: Optional[Tuple[float, float]] = None,
+        fusion_mode: str = "minmax"  
     ) -> List[Tuple[str, float]]:
-        """Executes serial multi-stage retrieval (Sparse Filter -> Dense Reranker)."""
-        # المرحلة 1: تصفية أولية سريعة باستخدام الموديل النصي (جلب عدد cascade_top_n من الوثائق)
+        """Executes parallel retrieval combining sparse and dense systems simultaneously."""
+        # 1. Fetch Sparse
+        sparse_results = []
         if sparse_method == "bm25" and self.bm25:
             k1, b = custom_bm25_params if custom_bm25_params else (1.2, 0.75)
-            candidate_docs = self._compute_custom_bm25(query_tokens, k1=k1, b=b, top_k=cascade_top_n)
+            sparse_results = self._compute_custom_bm25(query_tokens, k1=k1, b=b, top_k=top_k * 3)
         elif sparse_method == "tfidf" and self.tfidf:
-            candidate_docs = self.tfidf.retrieve(" ".join(query_tokens), top_k=cascade_top_n)
-        else:
-            return []
+            box_query = " ".join(query_tokens)
+            sparse_results = self.tfidf.retrieve(box_query, top_k=top_k * 3)
 
-        if not candidate_docs:
-            return []
-
-        candidate_ids = [doc_id for doc_id, _ in candidate_docs]
-
-        # المرحلة 2: إعادة ترتيب (Reranking) للوثائق المرشحة فقط باستخدام الـ Embedding المختار
-        reranked_scores: Dict[str, float] = {}
-        
+        # 2. Fetch Dense
+        dense_results = []
         if dense_method == "sbert" and self.sbert:
-            # نقوم بحساب التشابه مع الاستعلام للوثائق المرشحة فقط عبر الفهرس
-            # لتبسيط العملية وتجنب الـ Full-scan، نأخذ سكور الـ SBERT المباشر لهذه الـ IDs
-            all_sbert_res = self.sbert.retrieve(query_raw, top_k=len(self.sbert.doc_ids))
-            sbert_lookup = {d_id: score for d_id, score in all_sbert_res}
-            for d_id in candidate_ids:
-                reranked_scores[d_id] = sbert_lookup.get(d_id, 0.0)
-                
+            dense_results = self.sbert.retrieve(query_raw, top_k=top_k * 3)
         elif dense_method == "w2v" and self.w2v:
-            all_w2v_res = self.w2v.retrieve(query_tokens, top_k=len(self.w2v.doc_ids))
-            w2v_lookup = {d_id: score for d_id, score in all_w2v_res}
-            for d_id in candidate_ids:
-                reranked_scores[d_id] = w2v_lookup.get(d_id, 0.0)
+            dense_results = self.w2v.retrieve(query_tokens, top_k=top_k * 3)
 
-        # ترتيب النتائج النهائية بناءً على سكور إعادة الترتيب الدلالي
-        sorted_serial = sorted(reranked_scores.items(), key=lambda x: x[1], reverse=True)
-        return sorted_serial[:top_k]
+        # 3. Fusion Logic
+        hybrid_scores: Dict[str, float] = {}
+
+        if fusion_mode == "rrf":
+            for rank, (doc_id, _) in enumerate(sparse_results, 1):
+                hybrid_scores[doc_id] = hybrid_scores.get(doc_id, 0.0) + (1.0 / (60.0 + rank))
+            for rank, (doc_id, _) in enumerate(dense_results, 1):
+                hybrid_scores[doc_id] = hybrid_scores.get(doc_id, 0.0) + (1.0 / (60.0 + rank))
+        else:
+            norm_sparse = self._normalize_scores(sparse_results)
+            norm_dense = self._normalize_scores(dense_results)
+            all_candidates = set(norm_sparse.keys()).union(set(norm_dense.keys()))
+            
+            for doc_id in all_candidates:
+                hybrid_scores[doc_id] = (alpha * norm_sparse.get(doc_id, 0.0)) + ((1.0 - alpha) * norm_dense.get(doc_id, 0.0))
+
+        return sorted(hybrid_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
