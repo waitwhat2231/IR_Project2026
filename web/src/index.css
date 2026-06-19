@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------- */
+/* Design tokens — "Void & Ember"                                         */
+/* A dark, precision research-instrument palette for a serious search     */
+/* engine: near-black blue base, warm ember accent, teal for metrics.     */
+/* ---------------------------------------------------------------------- */
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Surfaces */
+  --color-bg: #0c0e14;
+  --color-surface: #141720;
+  --color-surface-elevated: #1b2035;
+  --color-surface-hover: #1a1f2e;
+
+  /* Borders */
+  --color-border: #252b3d;
+  --color-border-subtle: #191e2c;
+  --color-border-strong: #353d56;
+
+  /* Text */
+  --color-text: #eef2ff;
+  --color-text-secondary: #8a94b0;
+  --color-text-muted: #4d5575;
+
+  /* Brand / accent */
+  --color-accent: #f05e23;
+  --color-accent-hover: #ff7038;
+  --color-accent-warm: #ffb347;
+  --color-accent-subtle: #f05e231a;
+
+  /* Semantic */
+  --color-success: #2dd4bf;
+  --color-success-subtle: #2dd4bf1a;
+  --color-info: #6c8eef;
+  --color-info-subtle: #6c8eef1a;
+  --color-danger: #ef4565;
+  --color-danger-subtle: #ef45651a;
+
+  --radius-card: 0.875rem;
+  --radius-control: 0.625rem;
+
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.3s ease-out both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01" 1, "cv01" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--color-accent);
+    color: #0c0e14;
+  }
+
+  /* Scrollbars — thin, unobtrusive, matches surface tones */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--color-border-strong);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-text-muted);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
