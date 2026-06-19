@@ -1,22 +1,11 @@
 {
   "info": {
-    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "_postman_id": "eef7417e-be5a-4c74-9948-89d88fc2341a",
     "name": "IR 2026 Search API",
-    "description": "Postman collection for the IR 2026 API Gateway (Requirement 9).\n\n**Prerequisites**\n1. `conda activate ir_project`\n2. `docker compose up -d` (optional, for full document text in results)\n3. `uvicorn Services.gateway.main:app --host 0.0.0.0 --port 8000 --reload`\n\n**Collection variable** `baseUrl` defaults to `http://127.0.0.1:8000`.\n\nInteractive OpenAPI docs: `{{baseUrl}}/docs`",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "description": "Postman collection for the IR 2026 API Gateway (Requirement 9).\n\n**Prerequisites**\n1. `conda activate ir_project`\n2. `docker compose up -d` (optional, for full document text in results)\n3. `uvicorn Services.gateway.main:app --host 0.0.0.0 --port 8000 --reload`\n\n**Collection variables**\n- `baseUrl` → `http://127.0.0.1:8000`\n- `dataset`  → `webis-touche2020`\n\nInteractive OpenAPI docs: `{{baseUrl}}/docs`\n\n---\n**Folders**\n1. Health & Discovery — server status, dataset list, model options\n2. Search             — all retrieval modes and parameter combinations\n3. Query Refinement   — autocomplete suggestions from search history\n4. Evaluation         — MAP / P@10 / Recall / nDCG results per model (Req 8)\n5. Clustering         — document cluster summaries and 2D scatter data (Additional Req)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "30665643"
   },
-  "variable": [
-    {
-      "key": "baseUrl",
-      "value": "http://127.0.0.1:8000",
-      "type": "string"
-    },
-    {
-      "key": "dataset",
-      "value": "webis-touche2020",
-      "type": "string"
-    }
-  ],
   "item": [
     {
       "name": "Health & Discovery",
@@ -31,7 +20,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["health"]
             },
-            "description": "Returns API status, MongoDB connectivity, and configured dataset names."
+            "description": "Returns API status, MongoDB connectivity, configured dataset names, and which cluster models are currently loaded in memory.\n\n**New field (after clustering step)**\n`clusters_loaded`: `{\"webis-touche2020\": true}` — present once `/api/v1/clusters` has been called at least once."
           },
           "response": []
         },
@@ -45,7 +34,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "datasets"]
             },
-            "description": "List available datasets with document counts and model readiness (Req 9: dataset selection)."
+            "description": "List available datasets with document counts and model readiness (Req 9: dataset selection before querying)."
           },
           "response": []
         },
@@ -59,7 +48,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "options"]
             },
-            "description": "Returns supported execution modes, retrieval modes, and default BM25/hybrid parameters."
+            "description": "Returns supported execution modes, retrieval modes, and default BM25 / hybrid parameters. Use this to populate UI dropdowns and sliders."
           },
           "response": []
         }
@@ -73,26 +62,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Should teachers get tenure?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"bm25\",\n  \"top_k\": 5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Core pipeline only: preprocess query, run BM25. No spell check or synonym expansion."
+            "description": "Core pipeline only: preprocess query, run BM25. No spell check or synonym expansion.\n\n**Note:** if `step10_cluster.py` has been run and the cluster endpoint has been called at least once, each result will also contain a `cluster_id` field showing which topic cluster the document belongs to."
           },
           "response": []
         },
@@ -101,26 +83,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"shoud teacers get tenur?\",\n  \"execution_mode\": \"enhanced\",\n  \"retrieval_mode\": \"hybrid_parallel\",\n  \"sparse_method\": \"bm25\",\n  \"dense_method\": \"sbert\",\n  \"bm25_k1\": 1.2,\n  \"bm25_b\": 0.75,\n  \"alpha\": 0.5,\n  \"top_k\": 10,\n  \"include_snippet_chars\": 300\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Enhanced mode: spell correction + synonym expansion + history. Parallel hybrid fusion (BM25 + SBERT)."
+            "description": "Enhanced mode: spell correction + synonym expansion + history weighting. Parallel hybrid fusion (BM25 + SBERT).\n\nThe intentional typos in the query (`shoud teacers get tenur?`) demonstrate spell correction in the `query_processing.spell_corrected` field of the response."
           },
           "response": []
         },
@@ -129,26 +104,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Is vaping with e-cigarettes safe?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"hybrid_serial\",\n  \"sparse_method\": \"bm25\",\n  \"dense_method\": \"sbert\",\n  \"bm25_k1\": 1.5,\n  \"bm25_b\": 0.75,\n  \"cascade_top_n\": 200,\n  \"top_k\": 10\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Serial hybrid: BM25 retrieves top-N candidates, then SBERT reranks them."
+            "description": "Serial hybrid: BM25 retrieves the top `cascade_top_n` candidates first, then SBERT re-ranks only those candidates. Faster than parallel at large scale but recall is capped by the BM25 first stage."
           },
           "response": []
         },
@@ -157,26 +125,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"climate change policy debate\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"sbert\",\n  \"top_k\": 5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Dense retrieval only using SBERT embeddings."
+            "description": "Dense retrieval only using SBERT embeddings (semantic similarity). Good for queries where the relevant documents use different vocabulary than the query itself."
           },
           "response": []
         },
@@ -185,26 +146,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"gun control laws\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"tfidf\",\n  \"top_k\": 5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Sparse retrieval only using TF-IDF."
+            "description": "Sparse retrieval only using TF-IDF vector space model with cosine similarity."
           },
           "response": []
         },
@@ -213,26 +167,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"artificial intelligence ethics\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"word2vec\",\n  \"top_k\": 5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Dense retrieval only using Word2Vec."
+            "description": "Dense retrieval using Word2Vec embeddings trained on this specific corpus. Uses mean-pooled, L2-normalised document vectors compared with cosine similarity."
           },
           "response": []
         },
@@ -241,26 +188,19 @@
           "request": {
             "method": "POST",
             "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
+              { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"dataset\": \"{{dataset}}\",\n  \"query\": \"Should teachers get tenure?\",\n  \"execution_mode\": \"basic\",\n  \"retrieval_mode\": \"bm25\",\n  \"bm25_k1\": 2.0,\n  \"bm25_b\": 0.6,\n  \"top_k\": 10,\n  \"include_snippet_chars\": 500\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/search",
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "search"]
             },
-            "description": "Tune probabilistic BM25 parameters (k1, b) via the API (Req 2)."
+            "description": "Tune probabilistic BM25 parameters at query time (Req 2).\n\n`bm25_k1` (0.1–3.0): term-frequency saturation. Higher = less saturation, repetition rewarded more.\n`bm25_b`  (0.0–1.0): document-length normalisation. Higher = longer docs penalised more.\n\nDefault values: k1=1.5, b=0.75 (shared/config.py)."
           },
           "response": []
         }
@@ -287,15 +227,198 @@
                 {
                   "key": "limit",
                   "value": "5",
-                  "description": "Max suggestions (1–20)"
+                  "description": "Max suggestions to return (1–20)"
                 }
               ]
             },
-            "description": "Autocomplete suggestions from search history (Requirement 5). Run an enhanced search first to populate history."
+            "description": "Autocomplete suggestions from search history (Requirement 5).\n\nRun one or more enhanced searches first to populate the history file, then use this endpoint to see suggestions for a partial query prefix."
           },
           "response": []
         }
       ]
+    },
+    {
+      "name": "Evaluation",
+      "item": [
+        {
+          "name": "Evaluation — Baseline Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/evaluation?dataset={{dataset}}&phase=baseline&include_per_query=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "evaluation"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name (must match config DATASETS)"
+                },
+                {
+                  "key": "phase",
+                  "value": "baseline",
+                  "description": "baseline = before extra features | enhanced = after"
+                },
+                {
+                  "key": "include_per_query",
+                  "value": "false",
+                  "description": "false = aggregate metrics only (fast, for bar charts) | true = adds per-query breakdown"
+                }
+              ]
+            },
+            "description": "Returns aggregate evaluation metrics for every retrieval model in the **baseline** phase (before query refinement and hybrid features).\n\nReads from: `data/evaluation/{{dataset}}/baseline/metrics_summary.json`\n\nReturns per model: MAP, Recall@1000, P@10, nDCG@10, P@5, Recall@100, nDCG@100.\n\n**Prerequisite:** run the RankingEvaluator offline for the baseline phase first.\n\n**UI use:** feed `models[].aggregate` into a grouped bar chart (x = metric, groups = model names)."
+          },
+          "response": []
+        },
+        {
+          "name": "Evaluation — Enhanced Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/evaluation?dataset={{dataset}}&phase=enhanced&include_per_query=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "evaluation"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name"
+                },
+                {
+                  "key": "phase",
+                  "value": "enhanced",
+                  "description": "enhanced = after extra features (query refinement, hybrid, etc.)"
+                },
+                {
+                  "key": "include_per_query",
+                  "value": "false",
+                  "description": "Aggregate only"
+                }
+              ]
+            },
+            "description": "Returns aggregate metrics for every model in the **enhanced** phase (after applying query refinement, hybrid fusion, and other extra features).\n\nReads from: `data/evaluation/{{dataset}}/enhanced/metrics_summary.json`\n\nReturns 404 if the enhanced evaluation hasn't been run yet.\n\n**UI use:** compare these numbers against the baseline summary to show improvement from extra features."
+          },
+          "response": []
+        },
+        {
+          "name": "Evaluation — Baseline with Per-Query Breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/evaluation?dataset={{dataset}}&phase=baseline&include_per_query=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "evaluation"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name"
+                },
+                {
+                  "key": "phase",
+                  "value": "baseline",
+                  "description": "baseline or enhanced"
+                },
+                {
+                  "key": "include_per_query",
+                  "value": "true",
+                  "description": "true = includes models[].per_query breakdown for drill-down charts"
+                }
+              ]
+            },
+            "description": "Same as the baseline summary but also includes `per_query` metrics for every evaluated query under each model.\n\nReads from: `data/evaluation/{{dataset}}/baseline/per_query/{model}.json`\n\n**UI use:** feed `models[].per_query` into a heatmap or grouped bar chart of nDCG@10 per query — useful for identifying which queries each model handles well or poorly."
+          },
+          "response": []
+        },
+        {
+          "name": "Evaluation — Compare Baseline vs Enhanced",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/evaluation/compare?dataset={{dataset}}&include_per_query=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "evaluation", "compare"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name"
+                },
+                {
+                  "key": "include_per_query",
+                  "value": "true",
+                  "description": "true = includes per-query data for both phases (default for this endpoint)"
+                }
+              ]
+            },
+            "description": "Returns both evaluation phases (baseline and enhanced) in a single response for before/after comparison charts.\n\nResponse shape:\n```\n{\n  \"dataset\": \"...\",\n  \"baseline\": { ...EvaluationResponse... },\n  \"enhanced\": { ...EvaluationResponse... }   // null if not run yet\n}\n```\n\nEither phase can be `null` — the UI should handle this gracefully (show 'Not run yet').\n\n**UI use:** side-by-side grouped bar chart showing each model's metrics before vs after extra features. Also supports per-query diff charts to show which specific queries improved."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Clustering",
+      "item": [
+        {
+          "name": "Clusters — All Summaries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clusters?dataset={{dataset}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "clusters"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name"
+                }
+              ]
+            },
+            "description": "Returns summaries for all document clusters produced by `step10_cluster.py`.\n\n**Prerequisite:** `python offline/step10_cluster.py` (runs once, ~20 min on CPU).\n\nEach cluster in the response includes:\n- `id`: cluster index (0-based)\n- `size`: number of documents in the cluster\n- `pct`: percentage of the total corpus\n- `top_terms`: top-10 discriminative stemmed terms — these are the cluster's 'label'\n- `representative_doc_ids`: 3 document IDs closest to the centroid\n\nReads from: `data/models/clusters_{{dataset}}/clusters.json`\n\nReturns 404 with instructions if clustering hasn't been run.\n\n**UI use:** render a cluster-browse panel showing each cluster card (top_terms as label, size as subtitle). Clicking a cluster can filter the scatter plot or show its representative documents."
+          },
+          "response": []
+        },
+        {
+          "name": "Clusters — Scatter Data (2D Chart)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/clusters/scatter?dataset={{dataset}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "clusters", "scatter"],
+              "query": [
+                {
+                  "key": "dataset",
+                  "value": "{{dataset}}",
+                  "description": "Dataset name"
+                }
+              ]
+            },
+            "description": "Returns a stratified ~10 000-point sample of the corpus in 2D space plus all cluster summaries — everything the UI needs to render the scatter plot in one request.\n\n**Prerequisite:** same as /clusters — `step10_cluster.py` must have run.\n\nResponse shape:\n```\n{\n  \"dataset\": \"webis-touche2020\",\n  \"n_clusters\": 20,\n  \"n_points\": 10000,\n  \"clusters\": [ { id, size, pct, top_terms, representative_doc_ids }, ... ],\n  \"points\":   [ { doc_id, x, y, cluster_id }, ... ]\n}\n```\n\n2D coordinates are produced by UMAP (or PCA fallback). Each point's `cluster_id` maps to a colour from the `clusters` legend.\n\nReads from: `data/models/clusters_{{dataset}}/scatter_2d.json` + `clusters.json`\n\n**UI use (scatter plot):**\n- Map `cluster_id → colour` using the `clusters` array (assign a distinct colour per id).\n- Render `points` as a scatter chart (x, y, colour from cluster_id).\n- Build a legend from `clusters[].top_terms` (show top 3 terms as the cluster label).\n- Hovering a point → tooltip with cluster top_terms.\n- Clicking a cluster in the legend → highlight only that cluster's points.\n- When search results are shown, highlight their doc_ids on the same chart using the `cluster_id` returned in the `/search` response."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8000",
+      "type": "string"
+    },
+    {
+      "key": "dataset",
+      "value": "webis-touche2020",
+      "type": "string"
     }
   ]
 }
