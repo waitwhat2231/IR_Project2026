@@ -1,21 +1,18 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 
-export type AppView = "search" | "evaluation";
+export type AppView = 'search' | 'evaluation' | 'clusters';
 
 interface UiState {
   activeView: AppView;
   settingsPanelOpen: boolean;
-  rawJsonOpen: boolean;
   setActiveView: (view: AppView) => void;
   toggleSettingsPanel: () => void;
   closeSettingsPanel: () => void;
-  toggleRawJson: () => void;
 }
 
 export const useUiStore = create<UiState>()((set) => ({
-  activeView: "search",
+  activeView: 'search',
   settingsPanelOpen: false,
-  rawJsonOpen: false,
 
   setActiveView: (activeView) => {
     set({ activeView });
@@ -25,8 +22,5 @@ export const useUiStore = create<UiState>()((set) => ({
   },
   closeSettingsPanel: () => {
     set({ settingsPanelOpen: false });
-  },
-  toggleRawJson: () => {
-    set((state) => ({ rawJsonOpen: !state.rawJsonOpen }));
   },
 }));

@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import type { SearchResultItem } from "@/api/types";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { formatScore } from "@/utils/format";
+import { clusterColor } from "@/constants/clusterColors";
 
 interface ResultCardProps {
   result: SearchResultItem;
@@ -49,12 +50,23 @@ export function ResultCard({ result, index }: ResultCardProps) {
         </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className="text-xs text-text-muted">doc_id</span>
         <code className="truncate rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-xs text-text-secondary">
           {result.doc_id}
         </code>
         <CopyButton value={result.doc_id} label="doc_id" />
+
+        {result.cluster_id !== null && (
+          <span className="ml-1 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-elevated px-2 py-0.5 font-mono text-xs text-text-secondary">
+            <span
+              className="h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{ backgroundColor: clusterColor(result.cluster_id) }}
+              aria-hidden="true"
+            />
+            cluster {result.cluster_id}
+          </span>
+        )}
       </div>
 
       {result.text !== null && (

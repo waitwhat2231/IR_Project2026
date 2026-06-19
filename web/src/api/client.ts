@@ -1,7 +1,7 @@
 const GATEWAY_URL: string =
   import.meta.env.VITE_GATEWAY_URL ?? 'http://127.0.0.1:8000';
 
-const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class ApiError extends Error {
   readonly status: number;

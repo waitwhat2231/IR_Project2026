@@ -1,16 +1,17 @@
-import { SearchCode } from 'lucide-react';
-import { useHealth } from '@/hooks/useHealth';
-import { useDatasets } from '@/hooks/useDatasets';
-import { useUiStore } from '@/stores/uiStore';
-import type { AppView } from '@/stores/uiStore';
-import { StatusDot } from '@/components/ui/StatusDot';
-import { Badge } from '@/components/ui/Badge';
-import { Segmented } from '@/components/ui/Segmented';
-import { formatDocCount } from '@/utils/format';
+import { SearchCode } from "lucide-react";
+import { useHealth } from "@/hooks/useHealth";
+import { useDatasets } from "@/hooks/useDatasets";
+import { useUiStore } from "@/stores/uiStore";
+import type { AppView } from "@/stores/uiStore";
+import { StatusDot } from "@/components/ui/StatusDot";
+import { Badge } from "@/components/ui/Badge";
+import { Segmented } from "@/components/ui/Segmented";
+import { formatDocCount } from "@/utils/format";
 
 const VIEW_OPTIONS: { value: AppView; label: string }[] = [
-  { value: 'search', label: 'Search' },
-  { value: 'evaluation', label: 'Evaluation' },
+  { value: "search", label: "Search" },
+  { value: "clusters", label: "Clusters" },
+  { value: "evaluation", label: "Evaluation" },
 ];
 
 export function Header() {
@@ -19,11 +20,10 @@ export function Header() {
   const activeView = useUiStore((s) => s.activeView);
   const setActiveView = useUiStore((s) => s.setActiveView);
 
-  const healthStatus = healthQuery.isPending
-    ? 'pending'
-    : healthQuery.data?.status === 'ok'
-    ? 'online'
-    : 'offline';
+  const healthStatus =
+    healthQuery.isPending ? "pending" : healthQuery.data?.status === "ok"
+      ? "online"
+      : "offline";
 
   const dataset = datasetsQuery.data?.datasets[0];
 
@@ -39,7 +39,7 @@ export function Header() {
           </span>
         </div>
 
-        <nav className="hidden w-56 sm:block">
+        <nav className="hidden w-72 sm:block">
           <Segmented
             aria-label="Switch view"
             options={VIEW_OPTIONS}
@@ -60,20 +60,20 @@ export function Header() {
           <div
             className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1.5"
             title={
-              healthStatus === 'online'
-                ? 'Gateway is reachable'
-                : healthStatus === 'offline'
-                ? 'Gateway is unreachable'
-                : 'Checking gateway status'
+              healthStatus === "online"
+                ? "Gateway is reachable"
+                : healthStatus === "offline"
+                  ? "Gateway is unreachable"
+                  : "Checking gateway status"
             }
           >
             <StatusDot status={healthStatus} />
             <span className="hidden text-xs font-medium text-text-secondary lg:inline">
-              {healthStatus === 'online'
-                ? 'Online'
-                : healthStatus === 'offline'
-                ? 'Offline'
-                : 'Checking'}
+              {healthStatus === "online"
+                ? "Online"
+                : healthStatus === "offline"
+                  ? "Offline"
+                  : "Checking"}
             </span>
           </div>
         </div>

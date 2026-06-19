@@ -1,4 +1,4 @@
-import clsx from 'clsx';
+import clsx from "clsx";
 
 interface SegmentedOption<T extends string> {
   value: T;
@@ -10,7 +10,7 @@ interface SegmentedProps<T extends string> {
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
-  'aria-label': string;
+  "aria-label": string;
 }
 
 export function Segmented<T extends string>({
@@ -18,15 +18,15 @@ export function Segmented<T extends string>({
   value,
   onChange,
   disabled = false,
-  'aria-label': ariaLabel,
+  "aria-label": ariaLabel,
 }: SegmentedProps<T>) {
   return (
     <div
       role="radiogroup"
       aria-label={ariaLabel}
       className={clsx(
-        'inline-flex w-full rounded-control border border-border bg-surface p-1',
-        disabled && 'pointer-events-none opacity-40',
+        "inline-flex w-full rounded-control border border-border bg-surface p-1",
+        disabled && "pointer-events-none opacity-40",
       )}
     >
       {options.map((option) => {
@@ -42,11 +42,11 @@ export function Segmented<T extends string>({
               onChange(option.value);
             }}
             className={clsx(
-              'flex-1 rounded-[calc(var(--radius-control)-4px)] px-3 py-1.5 text-sm font-medium',
-              'transition-colors duration-150 ease-out cursor-pointer whitespace-nowrap',
+              "flex-1 rounded-[calc(var(--radius-control)-4px)] px-3 py-1.5 text-sm font-medium",
+              "transition-colors duration-150 ease-out cursor-pointer whitespace-nowrap",
               selected
-                ? 'bg-accent text-[#140a04] shadow-sm'
-                : 'text-text-secondary hover:text-text',
+                ? "bg-accent text-[#140a04] shadow-sm"
+                : "text-text-secondary hover:text-text",
             )}
           >
             {option.label}

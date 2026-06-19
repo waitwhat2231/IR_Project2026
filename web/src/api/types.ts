@@ -4,18 +4,18 @@
  * Pydantic models that FastAPI enforces as response_model.
  */
 
-export type ExecutionMode = "basic" | "enhanced";
+export type ExecutionMode = 'basic' | 'enhanced';
 
 export type RetrievalMode =
-  | "bm25"
-  | "tfidf"
-  | "sbert"
-  | "word2vec"
-  | "hybrid_parallel"
-  | "hybrid_serial";
+  | 'bm25'
+  | 'tfidf'
+  | 'sbert'
+  | 'word2vec'
+  | 'hybrid_parallel'
+  | 'hybrid_serial';
 
-export type SparseMethod = "bm25" | "tfidf";
-export type DenseMethod = "sbert" | "word2vec";
+export type SparseMethod = 'bm25' | 'tfidf';
+export type DenseMethod = 'sbert' | 'word2vec';
 
 // ---------------------------------------------------------------------------
 // GET /health
@@ -24,6 +24,7 @@ export interface HealthResponse {
   status: string;
   mongodb: boolean;
   datasets_configured: string[];
+  clusters_loaded: Record<string, boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,7 @@ export interface SearchResultItem {
   score: number;
   title: string | null;
   text: string | null;
+  cluster_id: number | null;
 }
 
 export interface SearchResponse {
@@ -112,4 +114,73 @@ export interface SearchResponse {
 export interface SuggestionsResponse {
   query_prefix: string;
   suggestions: string[];
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/evaluation, GET /api/v1/evaluation/compare
+// ---------------------------------------------------------------------------
+export type EvaluationPhase = 'baseline' | 'enhanced';
+
+/**
+ * Per-query metrics for one model: { [query_id]: { [metric_name]: value } }.
+ * Only present when include_per_query=true.
+ */
+export type PerQueryMetrics = Record<string, Record<string, number>>;
+
+export interface ModelEvaluation {
+  name: string;
+  /** Metric name -> value, e.g. MAP, "Recall@1000", "P@10", "nDCG@10", "P@5", "Recall@100", "nDCG@100". Keys are not fixed — render whatever the backend returns. */
+  aggregate: Record<string, number>;
+  per_query: PerQueryMetrics | null;
+  elapsed_sec: number | null;
+}
+
+export interface EvaluationResponse {
+  dataset: string;
+  phase: string;
+  num_queries: number;
+  top_k: number;
+  generated_at: string;
+  models: ModelEvaluation[];
+}
+
+export interface EvaluationCompareResponse {
+  dataset: string;
+  baseline: EvaluationResponse | null;
+  enhanced: EvaluationResponse | null;
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/clusters, GET /api/v1/clusters/scatter
+// ---------------------------------------------------------------------------
+export interface ClusterInfo {
+  id: number;
+  size: number;
+  pct: number;
+  top_terms: string[];
+  representative_doc_ids: string[];
+}
+
+export interface ClustersResponse {
+  dataset: string;
+  n_clusters: number;
+  n_docs: number;
+  embedding_source: string;
+  generated_at: string;
+  clusters: ClusterInfo[];
+}
+
+export interface ScatterPoint {
+  doc_id: string;
+  x: number;
+  y: number;
+  cluster_id: number;
+}
+
+export interface ClusterScatterResponse {
+  dataset: string;
+  n_clusters: number;
+  n_points: number;
+  clusters: ClusterInfo[];
+  points: ScatterPoint[];
 }

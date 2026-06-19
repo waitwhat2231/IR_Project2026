@@ -1,30 +1,30 @@
-import { useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { AlertTriangle, SearchCode } from 'lucide-react';
-import { useSearch } from '@/hooks/useSearch';
-import { useDatasets } from '@/hooks/useDatasets';
-import { useSearchConfigStore } from '@/stores/searchConfigStore';
-import { useUiStore } from '@/stores/uiStore';
-import { RETRIEVAL_MODE_META } from '@/constants/retrievalModels';
-import { SearchBar } from '@/components/search/SearchBar';
-import { SettingsPanel } from '@/components/search/SettingsPanel';
-import { MetaStrip } from '@/components/search/MetaStrip';
-import { QueryProcessingPanel } from '@/components/search/QueryProcessingPanel';
-import { ResultsList } from '@/components/results/ResultsList';
-import { ResultsSkeleton } from '@/components/results/ResultsSkeleton';
-import { EmptyState } from '@/components/results/EmptyState';
-import { RawJsonView } from '@/components/results/RawJsonView';
-import { Badge } from '@/components/ui/Badge';
+import { useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { AlertTriangle, SearchCode } from "lucide-react";
+import { useSearch } from "@/hooks/useSearch";
+import { useDatasets } from "@/hooks/useDatasets";
+import { useSearchConfigStore } from "@/stores/searchConfigStore";
+import { useUiStore } from "@/stores/uiStore";
+import { RETRIEVAL_MODE_META } from "@/constants/retrievalModels";
+import { SearchBar } from "@/components/search/SearchBar";
+import { SettingsPanel } from "@/components/search/SettingsPanel";
+import { MetaStrip } from "@/components/search/MetaStrip";
+import { QueryProcessingPanel } from "@/components/search/QueryProcessingPanel";
+import { ResultsList } from "@/components/results/ResultsList";
+import { ResultsSkeleton } from "@/components/results/ResultsSkeleton";
+import { EmptyState } from "@/components/results/EmptyState";
+import { RawJsonView } from "@/components/results/RawJsonView";
+import { Badge } from "@/components/ui/Badge";
 
 const EXAMPLE_QUERIES = [
-  'Should teachers get tenure?',
-  'Is vaping with e-cigarettes safe?',
-  'gun control laws',
-  'artificial intelligence ethics',
+  "Should teachers get tenure?",
+  "Is vaping with e-cigarettes safe?",
+  "gun control laws",
+  "artificial intelligence ethics",
 ];
 
 export function SearchView() {
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
 
   const datasetsQuery = useDatasets();
@@ -69,7 +69,7 @@ export function SearchView() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.25 }}
             className="flex min-h-[calc(100dvh-4rem)] flex-col items-center justify-center px-5"
           >
             <motion.div
@@ -89,11 +89,7 @@ export function SearchView() {
             <motion.div
               initial={{ opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.5,
-                delay: 0.08,
-                ease: [0.16, 1, 0.3, 1],
-              }}
+              transition={{ duration: 0.5, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
               className="w-full max-w-xl"
             >
               <SearchBar
@@ -109,11 +105,7 @@ export function SearchView() {
             <motion.div
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{
-                duration: 0.5,
-                delay: 0.16,
-                ease: [0.16, 1, 0.3, 1],
-              }}
+              transition={{ duration: 0.5, delay: 0.16, ease: [0.16, 1, 0.3, 1] }}
               className="mt-5 flex flex-wrap items-center justify-center gap-2"
             >
               {dataset && (
@@ -171,10 +163,7 @@ export function SearchView() {
 
               {searchMutation.isError && (
                 <div className="flex items-start gap-3 rounded-card border border-danger/30 bg-danger-subtle px-4 py-3.5">
-                  <AlertTriangle
-                    size={17}
-                    className="mt-0.5 shrink-0 text-danger"
-                  />
+                  <AlertTriangle size={17} className="mt-0.5 shrink-0 text-danger" />
                   <div className="space-y-0.5">
                     <p className="text-sm font-medium text-text">
                       Search failed
@@ -182,7 +171,7 @@ export function SearchView() {
                     <p className="text-xs text-text-secondary">
                       {searchMutation.error instanceof Error
                         ? searchMutation.error.message
-                        : 'Unknown error'}
+                        : "Unknown error"}
                     </p>
                   </div>
                 </div>
@@ -191,9 +180,7 @@ export function SearchView() {
               {searchMutation.isSuccess && (
                 <>
                   <MetaStrip response={searchMutation.data} />
-                  <QueryProcessingPanel
-                    data={searchMutation.data.query_processing}
-                  />
+                  <QueryProcessingPanel data={searchMutation.data.query_processing} />
 
                   {searchMutation.data.results.length === 0 ? (
                     <EmptyState query={submittedQuery} />

@@ -1,20 +1,21 @@
+import { useState } from "react";
 import { Braces, ChevronDown } from "lucide-react";
 import clsx from "clsx";
-import { useUiStore } from "@/stores/uiStore";
 
 interface RawJsonViewProps {
   data: unknown;
 }
 
 export function RawJsonView({ data }: RawJsonViewProps) {
-  const open = useUiStore((s) => s.rawJsonOpen);
-  const toggle = useUiStore((s) => s.toggleRawJson);
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="rounded-card border border-border-subtle bg-surface/60">
       <button
         type="button"
-        onClick={toggle}
+        onClick={() => {
+          setOpen((value) => !value);
+        }}
         aria-expanded={open}
         className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-left"
       >
