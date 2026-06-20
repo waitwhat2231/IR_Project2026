@@ -98,40 +98,52 @@ indexes (slow, run once) and **serving** queries against them (fast, run continu
 
 ### Platform
 
-| Component | Recommendation                                                        |
-| --------- | --------------------------------------------------------------------- |
-| OS        | Windows 10/11, Linux, or macOS (developed on Windows 10 + PowerShell) |
-| Python    | 3.10 (Conda environment named `ir_project` is assumed by the docs)    |
-| RAM       | ≥ 8 GB (offline peaks ~4–5 GB; SBERT encoding benefits from a GPU)    |
-| MongoDB   | 7.x (via Docker, or a local install)                                  |
-| Node.js   | Frontend in `web/`                                                    |
+| Component            | Recommendation                                                        |
+| -------------------- | --------------------------------------------------------------------- |
+| OS                   | Windows 10/11, Linux, or macOS (developed on Windows 10 + PowerShell) |
+| Python               | 3.10 (Conda environment named `ir_project` is assumed by the docs)    |
+| RAM                  | ≥ 8 GB (offline peaks ~4–5 GB; SBERT encoding benefits from a GPU)    |
+| MongoDB              | 7.x (via Docker, or a local install)                                  |
+| Frontend — Streamlit | Python only, via `frontend/requirements.txt` (no extra runtime)       |
+| Frontend — React     | Node.js, in `web/` (see `web/README.md`)                              |
 
 ### Python packages
 
-The committed `requirements.txt` covers **only the gateway** (FastAPI runtime). The full
-system additionally requires the scientific/ML stack used by the offline pipeline and the
-retrieval models:
+The committed root `requirements.txt` pins the **complete** dependency set — gateway runtime,
+offline pipeline, and every retrieval model — at the exact versions the system is built and
+tested against. The Streamlit frontend has its own, lighter `frontend/requirements.txt`; the
+React frontend's dependencies live in `web/package.json` (see `web/README.md`).
 
 ```text
-# Gateway / API (requirements.txt)
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-pydantic>=2.0.0
+# Core dependencies (requirements.txt)
+# Install with: pip install -r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
 
-# Data & ML (install additionally for the offline pipeline + retrieval)
-ir_datasets          # dataset download (BEIR / Webis-Touché 2020)
-nltk                 # tokenisation, Porter stemmer, stopwords, WordNet
-scikit-learn         # TfidfVectorizer, cosine similarity, MiniBatchKMeans, PCA
-scipy                # sparse matrices (.npz)
-numpy
-gensim               # Word2Vec
-sentence-transformers# SBERT (all-MiniLM-L6-v2)
-faiss-cpu            # dense ANN index (use faiss-gpu if available)
-torch                # backend for sentence-transformers
-pymongo              # MongoDB driver
-pyspellchecker       # query spell-correction
-umap-learn           # 2-D projection for clustering (optional; PCA fallback)
-tqdm                 # progress bars
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+faiss-cpu==1.7.4
+fastapi==0.137.1
+gensim==4.3.2
+httpx==0.27.0
+ir-datasets==0.5.9
+matplotlib==3.10.9
+nltk==3.8.1
+numpy==1.26.4
+pandas==2.3.3
+pydantic==2.13.4
+pymongo==4.6.3
+pyspellchecker==0.8.1
+rank-bm25==0.2.2
+scikit-learn==1.7.2
+scipy==1.12.0
+seaborn==0.13.2
+sentence-transformers==5.6.0
+spacy==3.7.2
+streamlit==1.58.0
+torch==2.12.0+cpu
+tqdm==4.68.2
+umap-learn==0.5.12
+uvicorn==0.49.0
+plotly==6.8.0
 
 # Streamlit frontend (frontend/requirements.txt)
 streamlit>=1.32.0
@@ -139,11 +151,13 @@ requests>=2.31.0
 urllib3>=2.0.0
 ```
 
-> **NLTK data.** First run requires downloading NLTK corpora: `punkt`, `stopwords`,
-> and `wordnet`. From Python:
+> **NLTK data.** First run requires downloading several NLTK corpora — not installable via pip.
+> From Python:
 >
 > ```python
-> import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')
+> import nltk
+> for p in ["punkt", "punkt_tab", "stopwords", "wordnet", "averaged_perceptron_tagger", "omw-1.4"]:
+>     nltk.download(p)
 > ```
 
 ### Configuration
@@ -191,64 +205,91 @@ Importing `shared.config` also **creates** the `data/raw`, `data/processed`,
 
 ```
 IR_Project2026/
-├── shared/                         # cross-cutting utilities
-│   ├── config.py                   # paths, dataset map, ports, BM25 defaults
-│   ├── database.py                 # DocumentDatabase — MongoDB wrapper
-│   └── pickle_stream.py            # streaming reader for multi-block pickles
+├── shared/                            # cross-cutting utilities
+│   ├── config.py                      # paths, dataset map, ports, BM25 defaults
+│   ├── database.py                    # DocumentDatabase — MongoDB wrapper
+│   ├── models.py                      # shared Pydantic/dataclass models
+│   ├── pickle_stream.py               # streaming reader for multi-block pickles
+│   └── utils.py                       # misc shared helpers
 │
-├── offline/                        # the build pipeline (run once, in order)
-│   ├── step1_download.py           # download docs/queries/qrels via ir_datasets
-│   ├── step2_preprocess.py         # clean + tokenise + stem (streaming)
+├── offline/                           # the build pipeline (run once, in order)
+│   ├── step1_download.py              # download docs/queries/qrels via ir_datasets
+│   ├── step2_preprocess.py            # clean + tokenise + stem (streaming)
 │   ├── step3_build_inverted_index.py  # term → {doc_id: tf} index for BM25
-│   ├── step4_train_tfidf.py        # TF-IDF matrix
-│   ├── step5_train_sbert.py        # SBERT embeddings + FAISS index
-│   ├── step6_train_word2vec.py     # Word2Vec model + doc vectors
-│   ├── step7_train_bm25.py         # BM25 config + sensitivity report
-│   ├── step8_verify_hybrid.py      # smoke test of the hybrid retriever
-│   ├── step9_load_to_mongodb.py    # load original text into MongoDB
-│   ├── step10_cluster.py           # KMeans clustering + 2-D scatter
-│   └── interactive_search.py       # terminal REPL search tool
+│   ├── step4_train_tfidf.py           # TF-IDF matrix
+│   ├── step5_train_sbert.py           # SBERT embeddings + FAISS index
+│   ├── step6_train_word2vec.py        # Word2Vec model + doc vectors
+│   ├── step7_train_bm25.py            # BM25 config + sensitivity report
+│   ├── step8_verify_hybrid.py         # smoke test of the hybrid retriever
+│   ├── step9_load_to_mongodb.py       # load original text into MongoDB
+│   ├── step10_cluster.py              # KMeans clustering + 2-D scatter
+│   ├── interactive_search.py          # terminal REPL search tool
+│   └── test_my_index.py               # ad-hoc inverted-index sanity check
 │
-├── Services/                       # service-oriented application code
-│   ├── gateway/                    # FastAPI public API (Requirement 9)
-│   │   ├── main.py                 # endpoints
-│   │   ├── schemas.py              # Pydantic request/response models
-│   │   └── search_pipeline.py      # orchestrates preprocess → retrieve → fetch
+├── Services/                          # service-oriented application code
+│   ├── gateway/                       # FastAPI public API — the live entry point
+│   │   ├── main.py                    # endpoints
+│   │   ├── schemas.py                 # Pydantic request/response models
+│   │   └── search_pipeline.py         # orchestrates preprocess → retrieve → fetch
+│   ├── api_gateway/                   # legacy gateway package, superseded by gateway/
+│   │   └── main.py
 │   ├── PreprocessingService/
-│   │   └── preprocessor.py         # TextPreprocessor (NLP pipeline)
+│   │   ├── main.py                    # standalone service entry point (port 8001)
+│   │   └── preprocessor.py            # TextPreprocessor (NLP pipeline)
 │   ├── indexing_service/
-│   │   └── inverted_index.py       # InvertedIndexManager
+│   │   ├── main.py                    # standalone service entry point (port 8002)
+│   │   └── inverted_index.py          # InvertedIndexManager
 │   ├── retrieval_service/
-│   │   ├── bm25_retriever.py       # Okapi BM25
-│   │   ├── tfidf_retriever.py      # sparse VSM
-│   │   ├── sbert_retriever.py      # dense SBERT + FAISS
-│   │   ├── word2vec_retriever.py   # dense Word2Vec
-│   │   ├── hybrid_retriever.py     # parallel fusion + serial cascade
-│   │   └── query_refiner.py        # spell-check, synonyms, history
+│   │   ├── main.py                    # standalone service entry point (port 8003)
+│   │   ├── bm25_retriever.py          # Okapi BM25
+│   │   ├── tfidf_retriever.py         # sparse VSM
+│   │   ├── sbert_retriever.py         # dense SBERT + FAISS
+│   │   ├── word2vec_retriever.py      # dense Word2Vec
+│   │   ├── hybrid_retriever.py        # parallel fusion + serial cascade
+│   │   └── query_refiner.py           # spell-check, synonyms, history (in-process)
+│   ├── query_refinement_service/
+│   │   ├── main.py                    # standalone service entry point (port 8004)
+│   │   ├── query_history.py           # search_history.json read/write
+│   │   ├── spell_corrector.py         # pyspellchecker-based correction
+│   │   └── synonym_expander.py        # WordNet synonym expansion
 │   ├── clustering_service/
-│   │   └── clusterer.py            # ClusterManager (serves cluster artifacts)
-│   └── ranking_evaluation_service/ # Requirement 8
-│       ├── scorer.py               # metric math (pure functions)
-│       ├── evaluator.py            # builds runs, scores, saves reports
-│       └── main.py                 # CLI entry point
+│   │   └── clusterer.py               # ClusterManager (serves cluster artifacts)
+│   └── ranking_evaluation_service/
+│       ├── scorer.py                  # metric math (pure functions)
+│       ├── evaluator.py               # builds runs, scores, saves reports
+│       └── main.py                    # CLI entry point
 │
-├── frontend/                       # Streamlit UI (prototype)
-│   ├── app.py                      # single-page search console
-│   └── api_client.py               # typed HTTP client for the gateway
-├── web/                            # React 19 + TypeScript UI (see web/README.md)
+├── web/                               # React 19 + TypeScript UI (see web/README.md)
 │
-├── data/                           # generated artifacts (git-ignored, see §14)
-├── docs/                           # extra docs (evaluation guide, Postman)
-├── notebooks/                      # exploratory Jupyter notebooks (01–08)
-├── tests/                          # ad-hoc model tests
-├── docker-compose.yml              # MongoDB container
-└── requirements.txt               # gateway dependencies
+├── frontend/                          # Streamlit UI (see frontend/README.md)
+│
+├── docs/
+│   └── postman/
+│       └── IR_2026_Search_API.postman_collection.json
+│
+├── tests/                             # ad-hoc / unit tests for the offline models
+│   ├── evaluate_tfidf.py
+│   ├── test_bm25.py
+│   ├── test_indexing.py
+│   ├── test_preprocessing.py
+│   ├── test_retrieval.py
+│   ├── test_tfidf_quick.py
+│   ├── test_word2vec.py
+│   └── testfile.py
+│
+├── docker-compose.yml                 # MongoDB container
+├── start_all_services.sh              # launches the gateway + standalone microservices together
+└── requirements.txt                   # full pinned dependency set (see §3)
 ```
 
-> **Note on duplicates.** Some files have `_old` variants (e.g.
-> `step2_preprocess_old.py`) and there are two gateway-like packages (`Services/gateway`
-> is the live one; `Services/api_gateway` is legacy). The active code paths are the ones
-> described in this guide.
+> **Not shown above.** `web/` (React 19 + TypeScript UI) has its own `web/README.md` and is
+> omitted from this tree for that reason — see §7 and §12.4 for how it fits into the system.
+> `data/` is git-ignored and generated by the offline pipeline, so it won't exist in a fresh
+> checkout (see §14 for its layout once populated).
+
+> **Note on duplicates.** There are two gateway-like packages: `Services/gateway` is the live
+> one; `Services/api_gateway` is legacy. The active code paths are the ones described in this
+> guide.
 
 ---
 
@@ -369,8 +410,9 @@ Two interchangeable UIs talk to the same gateway, and both respect the same hard
 search fire while `/api/v1/datasets` is still loading the corpus and every representation into
 memory, since that is the single most reliable way to exhaust RAM mid-demo.
 
-- **Streamlit** (`frontend/app.py`) — a polished single-page console with a typed HTTP client
-  (`frontend/api_client.py`). Good for quick demos. Run with `streamlit run frontend/app.py`.
+- **Streamlit** (`frontend/app.py`) — a polished console with a typed HTTP client
+  (`frontend/api_client.py`), organised into `tabs/` (clusters, evaluation) and shared `ui/`
+  building blocks. Good for quick demos. Run with `streamlit run frontend/app.py`.
 
 - **React 19 + TypeScript** (`web/`) — a three-view SPA (Vite, Tailwind v4, TanStack Query,
   Zustand, Motion, Lucide, Recharts) built around what the grader needs to verify, not just what
@@ -582,13 +624,11 @@ conda create -n ir_project python=3.10 -y
 conda activate ir_project
 
 # 2. Install dependencies
-pip install -r requirements.txt
-pip install ir_datasets nltk scikit-learn scipy numpy gensim sentence-transformers ^
-            faiss-cpu torch pymongo pyspellchecker umap-learn tqdm
-pip install -r frontend/requirements.txt   # for the Streamlit UI
+pip install -r requirements.txt             # gateway + offline pipeline + all retrieval models
+pip install -r frontend/requirements.txt    # for the Streamlit UI
 
 # 3. Download NLTK data
-python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')"
+python -c "import nltk; [nltk.download(p) for p in ['punkt','punkt_tab','stopwords','wordnet','averaged_perceptron_tagger','omw-1.4']]"
 ```
 
 ### 12.2 Start MongoDB
@@ -719,5 +759,5 @@ Original document **text is stored in MongoDB**, not on disk, and is fetched at 
 ---
 
 _Damascus University · Information Retrieval 2026 · This guide documents the system as
-implemented in this repository. Where the committed `requirements.txt` covers only the
-gateway, §3 lists the complete dependency set needed to reproduce the full pipeline._
+implemented in this repository. §3 lists the complete, pinned dependency set needed to
+reproduce the full pipeline._
