@@ -12,6 +12,15 @@ Key difference from SBERT:
              learns that "remdesivir" and "dexamethasone" cluster
              together because they appear in similar debate contexts
 
+NEW: score_subset() scores the query against a *given* list of doc_ids
+directly, instead of computing scores against the entire corpus and
+discarding everything else. retrieve()'s brute-force NumPy approach was
+never silently wrong the way SBERT's HNSW full-corpus search was (every
+row really does get scored), but it's still wasted work to score and sort
+~382K rows when the hybrid cascade only needs ~200 of them re-ranked --
+and it's the natural counterpart to SBERTRetriever.score_subset() so both
+dense legs of retrieve_serial behave the same way.
+
 Save layout:
   {save_dir}/word2vec.model       ← gensim model (word vectors + vocab)
   {save_dir}/doc_embeddings.npy   ← (N, 200) float32 document vectors
@@ -21,7 +30,7 @@ Save layout:
 import gc
 import pickle
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from gensim.models import Word2Vec
@@ -58,6 +67,12 @@ class Word2VecRetriever:
         self.model: Optional[Word2Vec] = None
         self.doc_embeddings: Optional[np.ndarray] = None  # (N, 200)
         self.doc_ids: List[str] = []
+
+        # Lazily-built doc_id -> row-in-doc_embeddings lookup, used only by
+        # score_subset(). Mirrors SBERTRetriever's cache; see that file's
+        # docstring for why it's keyed off id(self.doc_ids) for invalidation.
+        self._id_to_row: Optional[Dict[str, int]] = None
+        self._id_to_row_built_for: Optional[int] = None
 
     # ── Training ──────────────────────────────────────────────────────────────
 
@@ -163,6 +178,54 @@ class Word2VecRetriever:
             top_i = top_i_part[np.argsort(scores[top_i_part])[::-1]]
 
         return [(self.doc_ids[i], float(scores[i])) for i in top_i]
+
+    def _ensure_id_index(self) -> Dict[str, int]:
+        """Build (and cache) a doc_id -> row-in-doc_embeddings lookup."""
+        if self._id_to_row is None or self._id_to_row_built_for != id(self.doc_ids):
+            self._id_to_row = {doc_id: row for row, doc_id in enumerate(self.doc_ids)}
+            self._id_to_row_built_for = id(self.doc_ids)
+        return self._id_to_row
+
+    def score_subset(
+        self,
+        query_tokens: List[str],  # preprocessed tokens — same as step2
+        doc_ids: List[str],
+    ) -> List[Tuple[str, float]]:
+        """
+        Score `query_tokens` against ONLY `doc_ids`, directly from the
+        precomputed doc_embeddings matrix.
+
+        Use this instead of retrieve(..., top_k=len(self.doc_ids)) whenever
+        you already have a short candidate list (e.g. the hybrid cascade's
+        first-stage sparse results) and just need to re-rank it semantically.
+
+        doc_ids not found in this retriever's embedding store are skipped
+        (not padded with 0.0), matching SBERTRetriever.score_subset()'s
+        behavior so both dense legs of retrieve_serial are consistent.
+        """
+        if self.model is None or self.doc_embeddings is None:
+            raise RuntimeError("Word2VecRetriever not ready. Call fit() or load().")
+        if not doc_ids:
+            return []
+
+        id_to_row = self._ensure_id_index()
+
+        rows: List[int] = []
+        kept_ids: List[str] = []
+        for doc_id in doc_ids:
+            row = id_to_row.get(doc_id)
+            if row is not None:
+                rows.append(row)
+                kept_ids.append(doc_id)
+
+        if not rows:
+            return []
+
+        q_vec = self._mean_vector(query_tokens)  # (200,)
+        candidate_vecs = self.doc_embeddings[rows]  # (len(rows), 200)
+        scores = candidate_vecs @ q_vec  # both unit-norm -> dot product == cosine
+
+        return list(zip(kept_ids, (float(s) for s in scores)))
 
     # ── Persistence ───────────────────────────────────────────────────────────
 

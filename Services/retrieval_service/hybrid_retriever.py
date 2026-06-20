@@ -146,21 +146,29 @@ class HybridRetriever:
         candidate_ids = [doc_id for doc_id, _ in candidate_docs]
 
         # المرحلة 2: إعادة ترتيب (Reranking) للوثائق المرشحة فقط باستخدام الـ Embedding المختار
+        #
+        # FIX: previously this called sbert.retrieve(query_raw, top_k=len(self.sbert.doc_ids))
+        # i.e. asked FAISS for the ENTIRE corpus back, then filtered down to candidate_ids.
+        # With index_type="hnsw" (the default), that's not just wasteful -- it's wrong:
+        # HNSW's search is bounded by efSearch (default 64) and cannot actually return
+        # N valid results when N is the whole corpus; most requested slots come back
+        # as -1 and get silently dropped. The resulting lookup table then only covered
+        # a small, essentially random slice of the corpus, so most of candidate_ids
+        # (which were chosen by BM25/TF-IDF, with no relation to that random slice)
+        # silently fell back to a reranked score of 0.0 instead of their real
+        # similarity -- corrupting the rerank, not just slowing it down.
+        #
+        # score_subset() scores the query directly against only candidate_ids' own
+        # precomputed embeddings (a small, exact dot product) -- no FAISS search,
+        # so it's correct for every index_type and only does work proportional to
+        # cascade_top_n instead of the full corpus.
         reranked_scores: Dict[str, float] = {}
-        
+
         if dense_method == "sbert" and self.sbert:
-            # نقوم بحساب التشابه مع الاستعلام للوثائق المرشحة فقط عبر الفهرس
-            # لتبسيط العملية وتجنب الـ Full-scan، نأخذ سكور الـ SBERT المباشر لهذه الـ IDs
-            all_sbert_res = self.sbert.retrieve(query_raw, top_k=len(self.sbert.doc_ids))
-            sbert_lookup = {d_id: score for d_id, score in all_sbert_res}
-            for d_id in candidate_ids:
-                reranked_scores[d_id] = sbert_lookup.get(d_id, 0.0)
-                
+            reranked_scores = dict(self.sbert.score_subset(query_raw, candidate_ids))
+
         elif dense_method == "w2v" and self.w2v:
-            all_w2v_res = self.w2v.retrieve(query_tokens, top_k=len(self.w2v.doc_ids))
-            w2v_lookup = {d_id: score for d_id, score in all_w2v_res}
-            for d_id in candidate_ids:
-                reranked_scores[d_id] = w2v_lookup.get(d_id, 0.0)
+            reranked_scores = dict(self.w2v.score_subset(query_tokens, candidate_ids))
 
         # ترتيب النتائج النهائية بناءً على سكور إعادة الترتيب الدلالي
         sorted_serial = sorted(reranked_scores.items(), key=lambda x: x[1], reverse=True)

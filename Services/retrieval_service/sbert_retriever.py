@@ -13,6 +13,24 @@ CHANGES vs. the exact-only version:
     lets you override the recall/speed knob (nprobe / efSearch) per call
   - save()/load() persist index_type + ANN params in meta.pkl so a
     reloaded retriever doesn't silently fall back to defaults
+  - NEW: score_subset() scores the query against a *given* list of doc_ids
+    directly from the precomputed embedding matrix -- no FAISS search at
+    all. This is what the hybrid serial/cascade reranker should use.
+
+    Why this exists: retrieve_serial() used to call
+    retrieve(query_raw, top_k=len(self.doc_ids)) and then filter the
+    result down to its ~200 candidates. That "ask FAISS for the whole
+    corpus" pattern is always wasteful, but with index_type="hnsw" (the
+    default) it's actively WRONG: HNSW's search is bounded by efSearch
+    (default 64) and simply cannot return N valid results when N is the
+    full corpus size -- most of the requested slots come back as -1 and
+    get silently dropped. The leftover lookup table then only covers a
+    small, essentially random slice of the corpus, so most of the
+    cascade's real candidates silently get a reranked score of 0.0
+    instead of their actual similarity. score_subset() sidesteps the
+    index entirely for this case: it's a direct (len(doc_ids), 384) x
+    (384,) dot product against rows we already have in memory, exact,
+    fast, and correct regardless of which FAISS index_type is configured.
 
 Save layout (unchanged):
   {save_dir}/doc_embeddings.npy   <- (N, 384) float32
@@ -22,7 +40,7 @@ Save layout (unchanged):
 
 import pickle
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import faiss
 import numpy as np
@@ -53,6 +71,13 @@ class SBERTRetriever:
         self.hnsw_m = hnsw_m
         self.hnsw_ef_construction = hnsw_ef_construction
         self.hnsw_ef_search = hnsw_ef_search
+
+        # Lazily-built doc_id -> row-in-doc_embeddings lookup, used only by
+        # score_subset(). Built once on first use and cached; invalidated
+        # automatically whenever doc_ids is reassigned by encode_documents()
+        # or load() (see _ensure_id_index()).
+        self._id_to_row: Optional[Dict[str, int]] = None
+        self._id_to_row_built_for: Optional[int] = None  # id(self.doc_ids) it was built from
 
     # -- Encoding -----------------------------------------------------------
 
@@ -196,6 +221,71 @@ class SBERTRetriever:
             for r, idx in enumerate(indices[0])
             if idx >= 0
         ]
+
+    def _ensure_id_index(self) -> Dict[str, int]:
+        """
+        Build (and cache) a doc_id -> row-in-doc_embeddings lookup.
+
+        Rebuilt automatically if self.doc_ids has been reassigned since the
+        last build (encode_documents()/load() both replace the list object
+        outright, so an identity check is enough to detect that).
+        """
+        if self._id_to_row is None or self._id_to_row_built_for != id(self.doc_ids):
+            self._id_to_row = {doc_id: row for row, doc_id in enumerate(self.doc_ids)}
+            self._id_to_row_built_for = id(self.doc_ids)
+        return self._id_to_row
+
+    def score_subset(
+        self,
+        query_raw: str,  # original query -- NOT preprocessed
+        doc_ids: List[str],
+    ) -> List[Tuple[str, float]]:
+        """
+        Score `query_raw` against ONLY `doc_ids`, directly from the
+        precomputed embedding matrix -- no FAISS search involved at all.
+
+        Use this instead of retrieve(..., top_k=len(self.doc_ids)) whenever
+        you already have a short candidate list (e.g. the hybrid cascade's
+        first-stage sparse results) and just need to re-rank it semantically.
+        It is exact regardless of index_type ("flat"/"ivf"/"hnsw"), because
+        it never touches the (possibly approximate) FAISS index -- it just
+        re-uses the same unit-normalized vectors the index was built from.
+
+        doc_ids not found in this retriever's embedding store are skipped
+        (not padded with 0.0): a 0.0 default would be indistinguishable
+        from "found, but completely dissimilar," which would silently bias
+        downstream ranking the same way the bug this method replaces did.
+        """
+        if self.model is None or self.doc_embeddings is None:
+            raise RuntimeError(
+                "SBERTRetriever not ready. Call encode_documents() or load()."
+            )
+        if not doc_ids:
+            return []
+
+        id_to_row = self._ensure_id_index()
+
+        rows: List[int] = []
+        kept_ids: List[str] = []
+        for doc_id in doc_ids:
+            row = id_to_row.get(doc_id)
+            if row is not None:
+                rows.append(row)
+                kept_ids.append(doc_id)
+
+        if not rows:
+            return []
+
+        q_emb = self.model.encode(
+            [query_raw],
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        ).astype(np.float32)[0]  # (384,)
+
+        candidate_vecs = self.doc_embeddings[rows]  # (len(rows), 384)
+        scores = candidate_vecs @ q_emb  # inner product == cosine (both unit-norm)
+
+        return list(zip(kept_ids, (float(s) for s in scores)))
 
     def get_embedding(self, text: str) -> np.ndarray:
         """Single embedding -- used by hybrid serial reranker."""
