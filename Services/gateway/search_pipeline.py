@@ -59,6 +59,17 @@ class SearchPipeline:
                 w2v_dir=base / f"word2vec_{dataset}",
             )
             self._retrievers[dataset] = hybrid
+
+            # Feed the refiner's spell-checker the *real* corpus vocabulary so
+            # proper nouns / named entities / domain terms that genuinely appear
+            # in this dataset's documents (e.g. "Hitler") aren't mistaken for
+            # typos and "corrected" into an unrelated dictionary word (e.g.
+            # "hitter"). This is free: it just reuses the inverted index's
+            # term keys, which are already resident in memory from the load
+            # above -- no extra disk I/O, no extra model.
+            if hybrid.bm25 is not None:
+                self.refiner.load_corpus_vocabulary(hybrid.bm25.index.keys())
+
         return self._retrievers[dataset]
 
     def models_ready(self, dataset: str) -> bool:

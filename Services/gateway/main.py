@@ -12,15 +12,31 @@ Endpoints:
     GET  /api/v1/suggestions
     GET  /api/v1/evaluation
     GET  /api/v1/evaluation/compare
-    GET  /api/v1/clusters                 <- NEW
-    GET  /api/v1/clusters/scatter         <- NEW
+    GET  /api/v1/clusters
+    GET  /api/v1/clusters/scatter
+
+Evaluation endpoints — auto-run behaviour:
+    `_ensure_evaluation_phase()` checks for a cached
+    data/evaluation/{dataset}/{phase}/metrics_summary.json file. If it's
+    missing, it actually RUNS the Ranking & Evaluation Service (Requirement 8)
+    right here in-process instead of returning a 404 — reusing the gateway's
+    already-loaded HybridRetriever/QueryRefiner so it doesn't load a second
+    copy of the models. A per-(dataset, phase) lock makes sure two concurrent
+    requests for the same missing phase trigger only ONE run; the loser just
+    waits for the winner to finish, then reads the same file.
+
+    The first request for a phase that's never been computed will therefore
+    take as long as running the CLI once (several minutes, depending on
+    top_k and which models are loaded) — every request after that is served
+    from the cached file, same as before.
 """
 
 import json
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, Optional
+from threading import Lock
+from typing import Dict, Optional, Tuple
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +46,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.config import BM25_B, BM25_K1, DATA_DIR, DATASETS, MODEL_DIR, PORTS, TOP_K
 from Services.gateway.schemas import (
-    ClusterInfo,
     ClusterScatterResponse,
     ClustersResponse,
     DatasetInfo,
@@ -46,6 +61,11 @@ from Services.gateway.schemas import (
 )
 from Services.gateway.search_pipeline import SearchPipeline
 from Services.clustering_service.clusterer import ClusterManager
+from Services.ranking_evaluation_service.evaluator import RankingEvaluator
+from Services.ranking_evaluation_service.main import (
+    build_bm25_retriever,
+    apply_enhanced_refinement,
+)
 
 pipeline = SearchPipeline()
 
@@ -102,12 +122,12 @@ app.add_middleware(
 
 # ── Existing endpoints (unchanged) ────────────────────────────────────────────
 
-
 @app.get("/health")
 def health():
     mongo_ok = pipeline._mongo_connected
     cluster_status = {
-        name: _cluster_managers[name].is_ready() for name in _cluster_managers
+        name: _cluster_managers[name].is_ready()
+        for name in _cluster_managers
     }
     return {
         "status": "ok",
@@ -121,14 +141,12 @@ def health():
 def list_datasets():
     items = []
     for name, ir_key in DATASETS.items():
-        items.append(
-            DatasetInfo(
-                name=name,
-                ir_dataset_key=ir_key,
-                document_count=pipeline.document_count(name),
-                models_ready=pipeline.models_ready(name),
-            )
-        )
+        items.append(DatasetInfo(
+            name=name,
+            ir_dataset_key=ir_key,
+            document_count=pipeline.document_count(name),
+            models_ready=pipeline.models_ready(name),
+        ))
     return DatasetsResponse(datasets=items)
 
 
@@ -136,15 +154,15 @@ def list_datasets():
 def retrieval_options():
     return RetrievalOptions(
         defaults={
-            "execution_mode": "basic",
-            "retrieval_mode": "hybrid_parallel",
-            "sparse_method": "bm25",
-            "dense_method": "sbert",
-            "bm25_k1": BM25_K1,
-            "bm25_b": BM25_B,
-            "alpha": 0.5,
-            "cascade_top_n": 200,
-            "top_k": TOP_K,
+            "execution_mode":  "basic",
+            "retrieval_mode":  "hybrid_parallel",
+            "sparse_method":   "bm25",
+            "dense_method":    "sbert",
+            "bm25_k1":         BM25_K1,
+            "bm25_b":          BM25_B,
+            "alpha":           0.5,
+            "cascade_top_n":   200,
+            "top_k":           TOP_K,
         },
     )
 
@@ -185,7 +203,7 @@ def search(body: SearchRequest):
 
 @app.get("/api/v1/suggestions", response_model=SuggestionsResponse)
 def query_suggestions(
-    q: str = Query("", description="Partial query for autocomplete"),
+    q:     str = Query("", description="Partial query for autocomplete"),
     limit: int = Query(5, ge=1, le=20),
 ):
     suggestions = pipeline.suggestions(q, limit=limit) if q else []
@@ -194,13 +212,97 @@ def query_suggestions(
 
 # ── Evaluation endpoints ───────────────────────────────────────────────────────
 
+# Per-(dataset, phase) locks so two concurrent requests for the same missing
+# evaluation phase don't both kick off a full (multi-minute) evaluation run.
+# The second caller just blocks on the lock and re-checks the file once the
+# first caller releases it.
+_evaluation_locks: Dict[Tuple[str, str], Lock] = {}
+_evaluation_locks_guard = Lock()
+
+
+def _get_phase_lock(dataset: str, phase: str) -> Lock:
+    key = (dataset, phase)
+    with _evaluation_locks_guard:
+        if key not in _evaluation_locks:
+            _evaluation_locks[key] = Lock()
+        return _evaluation_locks[key]
+
+
+def _run_evaluation_phase(dataset: str, phase: str, top_k: int) -> None:
+    """
+    Actually runs the Ranking & Evaluation Service (Requirement 8) for one
+    (dataset, phase) pair and saves results under
+    data/evaluation/{dataset}/{phase}/ — the same output
+    Services/ranking_evaluation_service/main.py produces from the CLI.
+
+    Reuses the gateway's already-loaded HybridRetriever (and, for the
+    enhanced phase, its already-loaded QueryRefiner/TextPreprocessor — the
+    same instances live search uses, so the refiner's corpus-vocabulary
+    protection, e.g. for "Hitler", is consistent everywhere) instead of
+    loading a second copy of the models from disk.
+    """
+    hybrid = pipeline.get_retriever(dataset)  # loads + caches if not already loaded
+    bm25 = build_bm25_retriever(hybrid) if hybrid.bm25 else None
+
+    evaluator = RankingEvaluator(dataset, top_k=top_k)
+
+    if phase == "enhanced":
+        evaluator.queries = apply_enhanced_refinement(
+            evaluator.queries, pipeline.refiner, pipeline.preprocessor
+        )
+
+    model_specs = {
+        "tfidf":           (evaluator.build_run_tfidf,           hybrid.tfidf),
+        "bm25":            (evaluator.build_run_bm25,            bm25),
+        "sbert":           (evaluator.build_run_sbert,           hybrid.sbert),
+        "word2vec":        (evaluator.build_run_word2vec,        hybrid.w2v),
+        "hybrid_parallel": (evaluator.build_run_hybrid_parallel, hybrid),
+        "hybrid_serial":   (evaluator.build_run_hybrid_serial,   hybrid),
+    }
+
+    results_by_model = {}
+    for name, (run_builder, retriever) in model_specs.items():
+        if retriever is None:
+            continue
+        results_by_model[name] = evaluator.evaluate_model(name, run_builder, retriever)
+
+    if not results_by_model:
+        raise RuntimeError(
+            f"No models are loaded for dataset='{dataset}' — cannot run evaluation. "
+            f"Has the offline training pipeline (steps 4-7) been run for this dataset?"
+        )
+
+    evaluator.save_results(phase, results_by_model)
+
+
+def _ensure_evaluation_phase(dataset: str, phase: str, top_k: int) -> bool:
+    """
+    Returns True once metrics_summary.json exists for (dataset, phase),
+    running the evaluation service to produce it first if it's missing.
+    """
+    summary_path = DATA_DIR / "evaluation" / dataset / phase / "metrics_summary.json"
+    if summary_path.exists():
+        return True
+
+    lock = _get_phase_lock(dataset, phase)
+    with lock:
+        if summary_path.exists():
+            # Another request already finished this run while we were waiting.
+            return True
+        print(
+            f"[gateway] No cached evaluation for dataset='{dataset}' phase='{phase}' "
+            f"— running the evaluation service now (this can take a few minutes)..."
+        )
+        _run_evaluation_phase(dataset, phase, top_k=top_k)
+        return summary_path.exists()
+
 
 def _load_evaluation_phase(
     dataset: str,
-    phase: str,
+    phase:   str,
     include_per_query: bool,
 ) -> Optional[EvaluationResponse]:
-    phase_dir = DATA_DIR / "evaluation" / dataset / phase
+    phase_dir    = DATA_DIR / "evaluation" / dataset / phase
     summary_path = phase_dir / "metrics_summary.json"
 
     if not summary_path.exists():
@@ -216,19 +318,17 @@ def _load_evaluation_phase(
         per_query_data = None
         if include_per_query:
             safe_name = model_name.replace(" ", "_")
-            pq_path = per_query_dir / f"{safe_name}.json"
+            pq_path   = per_query_dir / f"{safe_name}.json"
             if pq_path.exists():
                 with open(pq_path, encoding="utf-8") as f:
                     per_query_data = json.load(f)
 
-        models.append(
-            ModelEvaluation(
-                name=model_name,
-                aggregate=model_data.get("aggregate", {}),
-                per_query=per_query_data,
-                elapsed_sec=model_data.get("elapsed_sec"),
-            )
-        )
+        models.append(ModelEvaluation(
+            name=model_name,
+            aggregate=model_data.get("aggregate", {}),
+            per_query=per_query_data,
+            elapsed_sec=model_data.get("elapsed_sec"),
+        ))
 
     return EvaluationResponse(
         dataset=summary["dataset"],
@@ -242,45 +342,74 @@ def _load_evaluation_phase(
 
 @app.get("/api/v1/evaluation", response_model=EvaluationResponse)
 def get_evaluation(
-    dataset: str = Query(..., description="Dataset name"),
-    phase: str = Query("baseline", pattern="^(baseline|enhanced)$"),
+    dataset: str  = Query(..., description="Dataset name"),
+    phase:   str  = Query("baseline", pattern="^(baseline|enhanced)$"),
     include_per_query: bool = Query(False),
+    top_k: int = Query(
+        1000, ge=10, le=10000,
+        description="Retrieval depth to use if the evaluation has to be run now.",
+    ),
 ):
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
 
+    try:
+        ready = _ensure_evaluation_phase(dataset, phase, top_k=top_k)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Evaluation could not be run for dataset='{dataset}' phase='{phase}': {exc}",
+        ) from exc
+
+    if not ready:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Evaluation ran but produced no results for dataset='{dataset}' phase='{phase}'.",
+        )
+
     result = _load_evaluation_phase(dataset, phase, include_per_query)
     if result is None:
+        # Shouldn't happen once `ready` is True — kept as a defensive fallback.
         raise HTTPException(
-            status_code=404,
-            detail=f"No evaluation results for dataset='{dataset}' phase='{phase}'.",
+            status_code=500,
+            detail=f"Evaluation results unexpectedly missing for dataset='{dataset}' phase='{phase}'.",
         )
     return result
 
 
 @app.get("/api/v1/evaluation/compare", response_model=EvaluationCompareResponse)
 def get_evaluation_compare(
-    dataset: str = Query(...),
+    dataset: str  = Query(...),
     include_per_query: bool = Query(True),
+    top_k: int = Query(
+        1000, ge=10, le=10000,
+        description="Retrieval depth to use if either phase has to be run now.",
+    ),
 ):
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
+
+    for phase in ("baseline", "enhanced"):
+        try:
+            _ensure_evaluation_phase(dataset, phase, top_k=top_k)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Evaluation could not be run for dataset='{dataset}' phase='{phase}': {exc}",
+            ) from exc
 
     baseline = _load_evaluation_phase(dataset, "baseline", include_per_query)
     enhanced = _load_evaluation_phase(dataset, "enhanced", include_per_query)
 
     if baseline is None and enhanced is None:
         raise HTTPException(
-            status_code=404,
-            detail=f"No evaluation results found for dataset='{dataset}'.",
+            status_code=503,
+            detail=f"Evaluation ran but produced no results for dataset='{dataset}'.",
         )
-    return EvaluationCompareResponse(
-        dataset=dataset, baseline=baseline, enhanced=enhanced
-    )
+    return EvaluationCompareResponse(dataset=dataset, baseline=baseline, enhanced=enhanced)
 
 
-# ── NEW: Cluster endpoints ─────────────────────────────────────────────────────
-
+# ── Cluster endpoints ──────────────────────────────────────────────────────────
 
 @app.get(
     "/api/v1/clusters",
@@ -300,9 +429,9 @@ def get_clusters(
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
 
-    manager = _get_cluster_manager(dataset)  # raises 404 if step10 not run
+    manager = _get_cluster_manager(dataset)    # raises 404 if step10 not run
     summary = manager.get_summary()
-    clusters = [ClusterInfo(**c) for c in manager.get_all_clusters()]
+    clusters = manager.get_all_clusters()
 
     return ClustersResponse(
         dataset=summary["dataset"],
@@ -335,10 +464,10 @@ def get_cluster_scatter(
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
 
-    manager = _get_cluster_manager(dataset)
-    summary = manager.get_summary()
-    clusters = [ClusterInfo(**c) for c in manager.get_all_clusters()]
-    raw_pts = manager.get_scatter_data()
+    manager  = _get_cluster_manager(dataset)
+    summary  = manager.get_summary()
+    clusters = manager.get_all_clusters()
+    raw_pts  = manager.get_scatter_data()
 
     points = [
         ScatterPoint(
@@ -361,7 +490,6 @@ def get_cluster_scatter(
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "Services.gateway.main:app",
         host="0.0.0.0",
