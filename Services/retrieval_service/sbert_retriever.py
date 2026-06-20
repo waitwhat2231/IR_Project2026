@@ -22,7 +22,7 @@ Save layout (unchanged):
 
 import pickle
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import faiss
 import numpy as np
@@ -34,31 +34,31 @@ class SBERTRetriever:
     def __init__(
         self,
         model_name: str = "all-MiniLM-L6-v2",
-        index_type: str = "hnsw",     # "flat" | "ivf" | "hnsw"
-        nlist:      int = 100,        # IVF: number of clusters
-        nprobe:     int = 10,         # IVF: clusters searched per query (speed/recall dial)
-        hnsw_m:     int = 32,         # HNSW: neighbors per node (build-time graph density)
+        index_type: str = "hnsw",  # "flat" | "ivf" | "hnsw"
+        nlist: int = 100,  # IVF: number of clusters
+        nprobe: int = 10,  # IVF: clusters searched per query (speed/recall dial)
+        hnsw_m: int = 32,  # HNSW: neighbors per node (build-time graph density)
         hnsw_ef_construction: int = 200,  # HNSW: build-time search width
-        hnsw_ef_search:       int = 64,   # HNSW: query-time search width (speed/recall dial)
+        hnsw_ef_search: int = 64,  # HNSW: query-time search width (speed/recall dial)
     ):
-        self.model_name:     str                         = model_name
-        self.model:          Optional[SentenceTransformer] = None
-        self.doc_embeddings: Optional[np.ndarray]        = None  # (N, 384)
-        self.faiss_index                                 = None
-        self.doc_ids:        List[str]                   = []
+        self.model_name: str = model_name
+        self.model: Optional[SentenceTransformer] = None
+        self.doc_embeddings: Optional[np.ndarray] = None  # (N, 384)
+        self.faiss_index: Any = None
+        self.doc_ids: List[str] = []
 
-        self.index_type           = index_type
-        self.nlist                = nlist
-        self.nprobe               = nprobe
-        self.hnsw_m                = hnsw_m
-        self.hnsw_ef_construction  = hnsw_ef_construction
-        self.hnsw_ef_search        = hnsw_ef_search
+        self.index_type = index_type
+        self.nlist = nlist
+        self.nprobe = nprobe
+        self.hnsw_m = hnsw_m
+        self.hnsw_ef_construction = hnsw_ef_construction
+        self.hnsw_ef_search = hnsw_ef_search
 
     # -- Encoding -----------------------------------------------------------
 
     def encode_documents(
         self,
-        docs:       dict,           # {doc_id: "original text"}
+        docs: dict,  # {doc_id: "original text"}
         batch_size: int = 128,
     ):
         """
@@ -75,31 +75,39 @@ class SBERTRetriever:
         if self.model is None:
             print(f"   Loading SBERT model: {self.model_name}")
             import torch
+
             target_device = "cuda" if torch.cuda.is_available() else "cpu"
             print(f"   [*] SentenceTransformer will run on: {target_device.upper()}")
             self.model = SentenceTransformer(self.model_name, device=target_device)
 
         self.doc_ids = list(docs.keys())
-        texts        = list(docs.values())
+        texts = list(docs.values())
 
         print(f"  Encoding {len(texts):,} documents...")
-        print(f"  Batch size: {batch_size}  "
-              f"Est. batches: {len(texts) // batch_size:,}")
+        print(
+            f"  Batch size: {batch_size}  "
+            f"Est. batches: {len(texts) // batch_size:,}"
+        )
 
         self.doc_embeddings = self.model.encode(
             texts,
-            batch_size           = batch_size,
-            show_progress_bar    = True,
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
+            batch_size=batch_size,
+            show_progress_bar=True,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
         )
-        print(f"  Shape: {self.doc_embeddings.shape}  "
-              f"({self.doc_embeddings.nbytes / 1e6:.1f} MB)")
+        print(
+            f"  Shape: {self.doc_embeddings.shape}  "
+            f"({self.doc_embeddings.nbytes / 1e6:.1f} MB)"
+        )
 
         self._build_faiss()
 
     def _build_faiss(self):
-        dim = self.doc_embeddings.shape[1]   # 384
+        assert (
+            self.doc_embeddings is not None
+        ), "encode_documents() must run before _build_faiss()"
+        dim = self.doc_embeddings.shape[1]  # 384
         vecs = self.doc_embeddings.astype(np.float32)
 
         if self.index_type == "flat":
@@ -115,16 +123,20 @@ class SBERTRetriever:
             # FAISS needs roughly >= 30-50x nlist training points for stable clusters.
             effective_nlist = min(self.nlist, max(1, n_train // 39))
             if effective_nlist < self.nlist:
-                print(f"  [!] Lowering nlist {self.nlist} -> {effective_nlist} "
-                      f"(not enough docs to train that many clusters)")
+                print(
+                    f"  [!] Lowering nlist {self.nlist} -> {effective_nlist} "
+                    f"(not enough docs to train that many clusters)"
+                )
 
             quantizer = faiss.IndexFlatIP(dim)
             self.faiss_index = faiss.IndexIVFFlat(
                 quantizer, dim, effective_nlist, faiss.METRIC_INNER_PRODUCT
             )
-            print(f"  Training IVF quantizer on {n_train:,} vectors "
-                  f"(nlist={effective_nlist})...")
-            self.faiss_index.train(vecs)          # k-means clustering happens here
+            print(
+                f"  Training IVF quantizer on {n_train:,} vectors "
+                f"(nlist={effective_nlist})..."
+            )
+            self.faiss_index.train(vecs)  # k-means clustering happens here
             self.faiss_index.add(vecs)
             self.faiss_index.nprobe = self.nprobe  # speed/recall dial, can change later
 
@@ -141,20 +153,26 @@ class SBERTRetriever:
         else:
             raise ValueError(f"Unknown index_type: {self.index_type!r}")
 
-        print(f"  FAISS index ({self.index_type}): "
-              f"{self.faiss_index.ntotal:,} vectors, dim={dim}")
+        print(
+            f"  FAISS index ({self.index_type}): "
+            f"{self.faiss_index.ntotal:,} vectors, dim={dim}"
+        )
 
     # -- Retrieval ------------------------------------------------------------
 
     def retrieve(
         self,
-        query_raw: str,     # original query -- NOT preprocessed
-        top_k:     int = 10,
-        nprobe:    Optional[int] = None,   # override IVF's speed/recall dial for this query
-        ef_search: Optional[int] = None,   # override HNSW's speed/recall dial for this query
+        query_raw: str,  # original query -- NOT preprocessed
+        top_k: int = 10,
+        nprobe: Optional[int] = None,  # override IVF's speed/recall dial for this query
+        ef_search: Optional[
+            int
+        ] = None,  # override HNSW's speed/recall dial for this query
     ) -> List[Tuple[str, float]]:
         if self.model is None or self.faiss_index is None:
-            raise RuntimeError("SBERTRetriever not ready. Call encode_documents() or load().")
+            raise RuntimeError(
+                "SBERTRetriever not ready. Call encode_documents() or load()."
+            )
 
         # Let a caller (e.g. the UI's "more accurate / faster" toggle) tune the
         # recall/speed trade-off per query without rebuilding the index.
@@ -165,9 +183,11 @@ class SBERTRetriever:
 
         q_emb = self.model.encode(
             [query_raw],
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
-        ).astype(np.float32)                      # (1, 384)
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+        ).astype(
+            np.float32
+        )  # (1, 384)
 
         scores, indices = self.faiss_index.search(q_emb, top_k)
 
@@ -183,13 +203,16 @@ class SBERTRetriever:
             self.model = SentenceTransformer(self.model_name)
         return self.model.encode(
             [text],
-            normalize_embeddings = True,
-            convert_to_numpy     = True,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
         )[0]
 
     # -- Persistence ------------------------------------------------------------
 
     def save(self, save_dir: Path):
+        assert (
+            self.doc_embeddings is not None
+        ), "Nothing to save — call encode_documents() first"
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -197,20 +220,23 @@ class SBERTRetriever:
         faiss.write_index(self.faiss_index, str(save_dir / "faiss.index"))
 
         with open(save_dir / "meta.pkl", "wb") as f:
-            pickle.dump({
-                "doc_ids":    self.doc_ids,
-                "model_name": self.model_name,
-                # Persist index config so load() reconstructs the same search
-                # behavior instead of silently defaulting back to "flat".
-                "index_type": self.index_type,
-                "nlist":      self.nlist,
-                "nprobe":     self.nprobe,
-                "hnsw_m":                 self.hnsw_m,
-                "hnsw_ef_construction":   self.hnsw_ef_construction,
-                "hnsw_ef_search":         self.hnsw_ef_search,
-            }, f)
+            pickle.dump(
+                {
+                    "doc_ids": self.doc_ids,
+                    "model_name": self.model_name,
+                    # Persist index config so load() reconstructs the same search
+                    # behavior instead of silently defaulting back to "flat".
+                    "index_type": self.index_type,
+                    "nlist": self.nlist,
+                    "nprobe": self.nprobe,
+                    "hnsw_m": self.hnsw_m,
+                    "hnsw_ef_construction": self.hnsw_ef_construction,
+                    "hnsw_ef_search": self.hnsw_ef_search,
+                },
+                f,
+            )
 
-        emb_mb   = (save_dir / "doc_embeddings.npy").stat().st_size / 1e6
+        emb_mb = (save_dir / "doc_embeddings.npy").stat().st_size / 1e6
         faiss_mb = (save_dir / "faiss.index").stat().st_size / 1e6
         print(f"  SBERT saved -> {save_dir}/")
         print(f"    index_type         : {self.index_type}")
@@ -225,17 +251,20 @@ class SBERTRetriever:
             meta = pickle.load(f)
 
         obj = cls(
-            model_name = meta["model_name"],
-            index_type = meta.get("index_type", "flat"),
-            nlist       = meta.get("nlist", 100),
-            nprobe      = meta.get("nprobe", 10),
-            hnsw_m                = meta.get("hnsw_m", 32),
-            hnsw_ef_construction  = meta.get("hnsw_ef_construction", 200),
-            hnsw_ef_search        = meta.get("hnsw_ef_search", 64),
+            model_name=meta["model_name"],
+            index_type=meta.get("index_type", "flat"),
+            nlist=meta.get("nlist", 100),
+            nprobe=meta.get("nprobe", 10),
+            hnsw_m=meta.get("hnsw_m", 32),
+            hnsw_ef_construction=meta.get("hnsw_ef_construction", 200),
+            hnsw_ef_search=meta.get("hnsw_ef_search", 64),
         )
-        obj.doc_ids        = meta["doc_ids"]
+        obj.doc_ids = meta["doc_ids"]
         obj.doc_embeddings = np.load(save_dir / "doc_embeddings.npy")
-        obj.faiss_index    = faiss.read_index(str(save_dir / "faiss.index"))
+        obj.faiss_index = faiss.read_index(str(save_dir / "faiss.index"))
+
+        assert obj.doc_embeddings is not None, "doc_embeddings.npy failed to load"
+        embedding_dim = obj.doc_embeddings.shape[1]  # capture now while narrowed
 
         # IVF's nprobe and HNSW's efSearch live on the loaded index object itself,
         # but FAISS's deserialization doesn't always restore them -- reapply explicitly.
@@ -248,6 +277,8 @@ class SBERTRetriever:
         obj.model = SentenceTransformer(obj.model_name)
 
         print(f"  SBERT loaded <- {save_dir}/")
-        print(f"    Docs : {len(obj.doc_ids):,}  Dim: {obj.doc_embeddings.shape[1]}  "
-              f"Index: {obj.index_type}")
+        print(
+            f"    Docs : {len(obj.doc_ids):,}  Dim: {embedding_dim}  "
+            f"Index: {obj.index_type}"
+        )
         return obj

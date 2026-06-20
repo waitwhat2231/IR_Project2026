@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 from Services.retrieval_service.tfidf_retriever import TFIDFRetriever
@@ -9,7 +10,10 @@ from shared.config import MODEL_DIR
 prefix = MODEL_DIR / "tfidf_webis-touche2020"
 print("Loading TF-IDF model...")
 model = TFIDFRetriever.load(prefix)
-print(f"Loaded: {model.doc_matrix.shape[0]:,} docs, {model.doc_matrix.shape[1]:,} terms")
+assert model.doc_matrix is not None
+print(
+    f"Loaded: {model.doc_matrix.shape[0]:,} docs, {model.doc_matrix.shape[1]:,} terms"
+)
 
 # ── Test queries (typical Touche2020 debate-style questions) ────
 test_queries = [

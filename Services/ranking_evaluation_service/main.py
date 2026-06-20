@@ -47,6 +47,8 @@ from Services.retrieval_service.bm25_retriever import BM25Retriever
 from Services.PreprocessingService.preprocessor import TextPreprocessor
 from Services.ranking_evaluation_service.evaluator import RankingEvaluator
 
+from typing import cast
+
 
 def build_bm25_retriever(hybrid, k1: float = 1.5, b: float = 0.75) -> BM25Retriever:
     """Reuse the index already loaded inside HybridRetriever — avoids a 246 MB reload."""
@@ -56,8 +58,9 @@ def build_bm25_retriever(hybrid, k1: float = 1.5, b: float = 0.75) -> BM25Retrie
     return bm25
 
 
-def _expand_query(text: str, nltk_stops: set, allowed_lexnames: set,
-                  content_pos: set) -> set:
+def _expand_query(
+    text: str, nltk_stops: set, allowed_lexnames: set, content_pos: set
+) -> set:
     """
     POS-tag the query, then expand content words (nouns + adjectives only)
     with WordNet synonyms.
@@ -76,6 +79,7 @@ def _expand_query(text: str, nltk_stops: set, allowed_lexnames: set,
     """
     from nltk.corpus import wordnet
     from nltk import pos_tag, word_tokenize
+    from nltk.corpus.reader.wordnet import Synset
 
     tagged = pos_tag(word_tokenize(text))
     expanded: set = set()
@@ -91,9 +95,12 @@ def _expand_query(text: str, nltk_stops: set, allowed_lexnames: set,
 
         wn_pos = wordnet.NOUN if pos.startswith("N") else wordnet.ADJ
         for syn in wordnet.synsets(cw, pos=wn_pos):
+            syn = cast(Synset, syn)
             if syn.lexname() not in allowed_lexnames:
                 continue
-            for lemma in syn.lemmas():
+
+            # Add 'or []' to safely handle a None return type
+            for lemma in syn.lemmas() or []:
                 lname = lemma.name().lower()
                 if (
                     "_" not in lname
@@ -126,15 +133,17 @@ def apply_enhanced_refinement(
     so both phases can be run in the same process without interference.
     """
     import nltk
-    nltk.download("wordnet",                    quiet=True)
-    nltk.download("omw-1.4",                    quiet=True)
+
+    nltk.download("wordnet", quiet=True)
+    nltk.download("omw-1.4", quiet=True)
     nltk.download("averaged_perceptron_tagger", quiet=True)
     nltk.download("averaged_perceptron_tagger_eng", quiet=True)
-    nltk.download("punkt",                      quiet=True)
-    nltk.download("punkt_tab",                  quiet=True)
-    nltk.download("stopwords",                  quiet=True)
+    nltk.download("punkt", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
+    nltk.download("stopwords", quiet=True)
 
     from nltk.corpus import stopwords as nltk_stopwords_corpus
+
     nltk_stops = set(nltk_stopwords_corpus.words("english"))
 
     # Nouns and adjectives only — see _expand_query docstring for reasoning
@@ -170,7 +179,7 @@ def apply_enhanced_refinement(
         processed = preprocessor.process(expanded_text)
 
         # Only the lexical representations change
-        data["processed_str"]    = processed["processed_str"]
+        data["processed_str"] = processed["processed_str"]
         data["processed_tokens"] = processed["processed_tokens"]
         # data["original"] is LEFT UNCHANGED — SBERT reads this
 
@@ -197,10 +206,20 @@ def main():
     )
     args = parser.parse_args()
 
-    dataset_name   = args.dataset
-    all_models     = ["tfidf", "bm25", "sbert", "word2vec", "hybrid_parallel", "hybrid_serial"]
-    selected       = all_models if args.models == "all" else \
-                     [m.strip() for m in args.models.split(",") if m.strip()]
+    dataset_name = args.dataset
+    all_models = [
+        "tfidf",
+        "bm25",
+        "sbert",
+        "word2vec",
+        "hybrid_parallel",
+        "hybrid_serial",
+    ]
+    selected = (
+        all_models
+        if args.models == "all"
+        else [m.strip() for m in args.models.split(",") if m.strip()]
+    )
 
     print("=" * 70)
     print(" IR System Evaluation Service — Requirement 8")
@@ -212,16 +231,16 @@ def main():
     print("\n[1/3] Loading all retrievers...")
     hybrid = HybridRetriever()
     hybrid.load_all_retrievers(
-        bm25_dir    = MODEL_DIR / f"bm25_{dataset_name}",
-        tfidf_prefix= MODEL_DIR / f"tfidf_{dataset_name}",
-        sbert_dir   = MODEL_DIR / f"sbert_{dataset_name}",
-        w2v_dir     = MODEL_DIR / f"word2vec_{dataset_name}",
+        bm25_dir=MODEL_DIR / f"bm25_{dataset_name}",
+        tfidf_prefix=MODEL_DIR / f"tfidf_{dataset_name}",
+        sbert_dir=MODEL_DIR / f"sbert_{dataset_name}",
+        w2v_dir=MODEL_DIR / f"word2vec_{dataset_name}",
     )
     bm25 = build_bm25_retriever(hybrid) if hybrid.bm25 else None
 
     # ── 2. Set up evaluator ───────────────────────────────────────────────────
     print("\n[2/3] Running evaluation...")
-    evaluator    = RankingEvaluator(dataset_name, top_k=args.top_k)
+    evaluator = RankingEvaluator(dataset_name, top_k=args.top_k)
     preprocessor = TextPreprocessor(use_stemming=True)
 
     if args.phase == "enhanced":
@@ -234,8 +253,8 @@ def main():
         # Show one before/after example so the console confirms real changes happened
         sample_qid = next(iter(evaluator.queries))
         before = original_queries[sample_qid]["processed_tokens"]
-        after  = evaluator.queries[sample_qid]["processed_tokens"]
-        new    = sorted(set(after) - set(before))
+        after = evaluator.queries[sample_qid]["processed_tokens"]
+        new = sorted(set(after) - set(before))
         print(f"\n  Sample qid={sample_qid}:")
         print(f"    baseline tokens  : {before}")
         print(f"    enhanced tokens  : {after}")
@@ -246,12 +265,12 @@ def main():
 
     # ── 3. Evaluate each model ────────────────────────────────────────────────
     model_specs = {
-        "tfidf":           (evaluator.build_run_tfidf,           hybrid.tfidf),
-        "bm25":            (evaluator.build_run_bm25,            bm25),
-        "sbert":           (evaluator.build_run_sbert,           hybrid.sbert),
-        "word2vec":        (evaluator.build_run_word2vec,        hybrid.w2v),
+        "tfidf": (evaluator.build_run_tfidf, hybrid.tfidf),
+        "bm25": (evaluator.build_run_bm25, bm25),
+        "sbert": (evaluator.build_run_sbert, hybrid.sbert),
+        "word2vec": (evaluator.build_run_word2vec, hybrid.w2v),
         "hybrid_parallel": (evaluator.build_run_hybrid_parallel, hybrid),
-        "hybrid_serial":   (evaluator.build_run_hybrid_serial,   hybrid),
+        "hybrid_serial": (evaluator.build_run_hybrid_serial, hybrid),
     }
 
     results_by_model = {}

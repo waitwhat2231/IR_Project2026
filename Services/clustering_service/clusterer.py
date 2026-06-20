@@ -31,10 +31,10 @@ from typing import Dict, List, Optional
 class ClusterManager:
 
     def __init__(self):
-        self._summary:     Optional[dict]             = None   # clusters.json content
-        self._doc_map:     Optional[Dict[str, int]]   = None   # {doc_id → cluster_id}
-        self._scatter:     Optional[List[dict]]        = None   # scatter_2d.json content
-        self._dataset:     Optional[str]               = None
+        self._summary: Optional[dict] = None  # clusters.json content
+        self._doc_map: Optional[Dict[str, int]] = None  # {doc_id → cluster_id}
+        self._scatter: Optional[List[dict]] = None  # scatter_2d.json content
+        self._dataset: Optional[str] = None
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -46,8 +46,8 @@ class ClusterManager:
         cluster_dir = Path(cluster_dir)
 
         clusters_path = cluster_dir / "clusters.json"
-        doc_map_path  = cluster_dir / "doc_cluster_map.pkl"
-        scatter_path  = cluster_dir / "scatter_2d.json"
+        doc_map_path = cluster_dir / "doc_cluster_map.pkl"
+        scatter_path = cluster_dir / "scatter_2d.json"
 
         if not clusters_path.exists():
             raise FileNotFoundError(
@@ -68,6 +68,11 @@ class ClusterManager:
 
         self._dataset = dataset_name
 
+        # Narrow Optional -> concrete types for the type checker; these are
+        # guaranteed non-None immediately after the assignments above.
+        assert self._summary is not None
+        assert self._scatter is not None
+
         print(
             f"[ClusterManager] Ready — "
             f"{self._summary['n_clusters']} clusters, "
@@ -83,12 +88,13 @@ class ClusterManager:
     def get_summary(self) -> dict:
         """High-level metadata: dataset, n_clusters, n_docs, generated_at."""
         self._require_loaded()
+        assert self._summary is not None
         return {
-            "dataset":          self._summary["dataset"],
-            "n_clusters":       self._summary["n_clusters"],
-            "n_docs":           self._summary["n_docs"],
+            "dataset": self._summary["dataset"],
+            "n_clusters": self._summary["n_clusters"],
+            "n_docs": self._summary["n_docs"],
             "embedding_source": self._summary["embedding_source"],
-            "generated_at":     self._summary["generated_at"],
+            "generated_at": self._summary["generated_at"],
         }
 
     def get_all_clusters(self) -> List[dict]:
@@ -98,12 +104,13 @@ class ClusterManager:
         but not needed by the UI and would bloat the API response.
         """
         self._require_loaded()
+        assert self._summary is not None
         return [
             {
-                "id":                    c["id"],
-                "size":                  c["size"],
-                "pct":                   c["pct"],
-                "top_terms":             c["top_terms"],
+                "id": c["id"],
+                "size": c["size"],
+                "pct": c["pct"],
+                "top_terms": c["top_terms"],
                 "representative_doc_ids": c["representative_doc_ids"],
             }
             for c in self._summary["clusters"]
@@ -112,13 +119,14 @@ class ClusterManager:
     def get_cluster_info(self, cluster_id: int) -> Optional[dict]:
         """Single cluster summary by id. Returns None if id is out of range."""
         self._require_loaded()
+        assert self._summary is not None
         for c in self._summary["clusters"]:
             if c["id"] == cluster_id:
                 return {
-                    "id":                    c["id"],
-                    "size":                  c["size"],
-                    "pct":                   c["pct"],
-                    "top_terms":             c["top_terms"],
+                    "id": c["id"],
+                    "size": c["size"],
+                    "pct": c["pct"],
+                    "top_terms": c["top_terms"],
                     "representative_doc_ids": c["representative_doc_ids"],
                 }
         return None
@@ -128,6 +136,7 @@ class ClusterManager:
     def get_cluster_for_doc(self, doc_id: str) -> Optional[int]:
         """O(1) lookup: which cluster does this document belong to?"""
         self._require_loaded()
+        assert self._doc_map is not None
         return self._doc_map.get(doc_id)
 
     def annotate_doc_ids(self, doc_ids: List[str]) -> Dict[str, Optional[int]]:
@@ -137,6 +146,7 @@ class ClusterManager:
         with cluster membership so the UI can colour-code them.
         """
         self._require_loaded()
+        assert self._doc_map is not None
         return {did: self._doc_map.get(did) for did in doc_ids}
 
     # ── Scatter data ──────────────────────────────────────────────────────────
@@ -150,6 +160,7 @@ class ClusterManager:
         The UI renders it as a coloured scatter plot.
         """
         self._require_loaded()
+        assert self._scatter is not None
         return self._scatter
 
     # ── Internal ──────────────────────────────────────────────────────────────

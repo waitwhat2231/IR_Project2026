@@ -30,6 +30,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from shared.config import BM25_B, BM25_K1, DATA_DIR, DATASETS, MODEL_DIR, PORTS, TOP_K
 from Services.gateway.schemas import (
+    ClusterInfo,
     ClusterScatterResponse,
     ClustersResponse,
     DatasetInfo,
@@ -101,12 +102,12 @@ app.add_middleware(
 
 # ── Existing endpoints (unchanged) ────────────────────────────────────────────
 
+
 @app.get("/health")
 def health():
     mongo_ok = pipeline._mongo_connected
     cluster_status = {
-        name: _cluster_managers[name].is_ready()
-        for name in _cluster_managers
+        name: _cluster_managers[name].is_ready() for name in _cluster_managers
     }
     return {
         "status": "ok",
@@ -120,12 +121,14 @@ def health():
 def list_datasets():
     items = []
     for name, ir_key in DATASETS.items():
-        items.append(DatasetInfo(
-            name=name,
-            ir_dataset_key=ir_key,
-            document_count=pipeline.document_count(name),
-            models_ready=pipeline.models_ready(name),
-        ))
+        items.append(
+            DatasetInfo(
+                name=name,
+                ir_dataset_key=ir_key,
+                document_count=pipeline.document_count(name),
+                models_ready=pipeline.models_ready(name),
+            )
+        )
     return DatasetsResponse(datasets=items)
 
 
@@ -133,15 +136,15 @@ def list_datasets():
 def retrieval_options():
     return RetrievalOptions(
         defaults={
-            "execution_mode":  "basic",
-            "retrieval_mode":  "hybrid_parallel",
-            "sparse_method":   "bm25",
-            "dense_method":    "sbert",
-            "bm25_k1":         BM25_K1,
-            "bm25_b":          BM25_B,
-            "alpha":           0.5,
-            "cascade_top_n":   200,
-            "top_k":           TOP_K,
+            "execution_mode": "basic",
+            "retrieval_mode": "hybrid_parallel",
+            "sparse_method": "bm25",
+            "dense_method": "sbert",
+            "bm25_k1": BM25_K1,
+            "bm25_b": BM25_B,
+            "alpha": 0.5,
+            "cascade_top_n": 200,
+            "top_k": TOP_K,
         },
     )
 
@@ -182,7 +185,7 @@ def search(body: SearchRequest):
 
 @app.get("/api/v1/suggestions", response_model=SuggestionsResponse)
 def query_suggestions(
-    q:     str = Query("", description="Partial query for autocomplete"),
+    q: str = Query("", description="Partial query for autocomplete"),
     limit: int = Query(5, ge=1, le=20),
 ):
     suggestions = pipeline.suggestions(q, limit=limit) if q else []
@@ -191,12 +194,13 @@ def query_suggestions(
 
 # ── Evaluation endpoints ───────────────────────────────────────────────────────
 
+
 def _load_evaluation_phase(
     dataset: str,
-    phase:   str,
+    phase: str,
     include_per_query: bool,
 ) -> Optional[EvaluationResponse]:
-    phase_dir    = DATA_DIR / "evaluation" / dataset / phase
+    phase_dir = DATA_DIR / "evaluation" / dataset / phase
     summary_path = phase_dir / "metrics_summary.json"
 
     if not summary_path.exists():
@@ -212,17 +216,19 @@ def _load_evaluation_phase(
         per_query_data = None
         if include_per_query:
             safe_name = model_name.replace(" ", "_")
-            pq_path   = per_query_dir / f"{safe_name}.json"
+            pq_path = per_query_dir / f"{safe_name}.json"
             if pq_path.exists():
                 with open(pq_path, encoding="utf-8") as f:
                     per_query_data = json.load(f)
 
-        models.append(ModelEvaluation(
-            name=model_name,
-            aggregate=model_data.get("aggregate", {}),
-            per_query=per_query_data,
-            elapsed_sec=model_data.get("elapsed_sec"),
-        ))
+        models.append(
+            ModelEvaluation(
+                name=model_name,
+                aggregate=model_data.get("aggregate", {}),
+                per_query=per_query_data,
+                elapsed_sec=model_data.get("elapsed_sec"),
+            )
+        )
 
     return EvaluationResponse(
         dataset=summary["dataset"],
@@ -236,8 +242,8 @@ def _load_evaluation_phase(
 
 @app.get("/api/v1/evaluation", response_model=EvaluationResponse)
 def get_evaluation(
-    dataset: str  = Query(..., description="Dataset name"),
-    phase:   str  = Query("baseline", pattern="^(baseline|enhanced)$"),
+    dataset: str = Query(..., description="Dataset name"),
+    phase: str = Query("baseline", pattern="^(baseline|enhanced)$"),
     include_per_query: bool = Query(False),
 ):
     if dataset not in DATASETS:
@@ -254,7 +260,7 @@ def get_evaluation(
 
 @app.get("/api/v1/evaluation/compare", response_model=EvaluationCompareResponse)
 def get_evaluation_compare(
-    dataset: str  = Query(...),
+    dataset: str = Query(...),
     include_per_query: bool = Query(True),
 ):
     if dataset not in DATASETS:
@@ -268,10 +274,13 @@ def get_evaluation_compare(
             status_code=404,
             detail=f"No evaluation results found for dataset='{dataset}'.",
         )
-    return EvaluationCompareResponse(dataset=dataset, baseline=baseline, enhanced=enhanced)
+    return EvaluationCompareResponse(
+        dataset=dataset, baseline=baseline, enhanced=enhanced
+    )
 
 
 # ── NEW: Cluster endpoints ─────────────────────────────────────────────────────
+
 
 @app.get(
     "/api/v1/clusters",
@@ -291,9 +300,9 @@ def get_clusters(
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
 
-    manager = _get_cluster_manager(dataset)    # raises 404 if step10 not run
+    manager = _get_cluster_manager(dataset)  # raises 404 if step10 not run
     summary = manager.get_summary()
-    clusters = manager.get_all_clusters()
+    clusters = [ClusterInfo(**c) for c in manager.get_all_clusters()]
 
     return ClustersResponse(
         dataset=summary["dataset"],
@@ -326,10 +335,10 @@ def get_cluster_scatter(
     if dataset not in DATASETS:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found.")
 
-    manager  = _get_cluster_manager(dataset)
-    summary  = manager.get_summary()
-    clusters = manager.get_all_clusters()
-    raw_pts  = manager.get_scatter_data()
+    manager = _get_cluster_manager(dataset)
+    summary = manager.get_summary()
+    clusters = [ClusterInfo(**c) for c in manager.get_all_clusters()]
+    raw_pts = manager.get_scatter_data()
 
     points = [
         ScatterPoint(
@@ -352,6 +361,7 @@ def get_cluster_scatter(
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "Services.gateway.main:app",
         host="0.0.0.0",
